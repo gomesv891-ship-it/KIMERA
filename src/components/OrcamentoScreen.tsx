@@ -35,7 +35,6 @@ import {
   RotateCcw,
   ChevronDown,
   Copy,
-  Image as ImageIcon,
 } from 'lucide-react';
 import { ClientRecord, ClientType, SavedOrcamento, OrcamentoStatus, PriceTableTier } from '../types';
 import { addClientActivity } from '../utils/activities';
@@ -94,7 +93,6 @@ import {
   calculateRodapeBarras,
   extractBarLengthFromProductName,
   parseBarCountFromInput,
-  formatRodapeDetailText,
   stripRodapeAutoDetail,
   parseRodapeDetails,
   isRodapeColaCatalogProduct,
@@ -850,22 +848,16 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     if (!rawVal) return null;
 
     const barLen = extractBarLengthFromProductName(selectedProductCatalog, 2.4);
+    const manualDetail = stripRodapeAutoDetail(newSubtitulo) || '';
 
     const explicitBars = parseBarCountFromInput(rawVal);
     if (explicitBars && explicitBars > 0) {
       const requestedMl = Math.round(explicitBars * barLen * 100) / 100;
-      const detailText = formatRodapeDetailText({
-        requestedMl,
-        barCount: explicitBars,
-        barLengthMeters: barLen,
-        existingDetail: newSubtitulo,
-      });
       rodapeRequestedMlRef.current = requestedMl;
       rodapeLastBarrasRef.current = explicitBars;
       setNewQtd(String(explicitBars));
       setNewUnid('barras');
-      setNewSubtitulo(detailText);
-      return { barras: explicitBars, barLen, requestedMl, detailText };
+      return { barras: explicitBars, barLen, requestedMl, detailText: manualDetail };
     }
 
     const parsedNum = parsePtBrNumeric(rawVal);
@@ -881,35 +873,21 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
         rodapeRequestedMlRef.current && rodapeRequestedMlRef.current > 0
           ? rodapeRequestedMlRef.current
           : Math.round(bars * barLen * 100) / 100;
-      const detailText = formatRodapeDetailText({
-        requestedMl: preservedMl,
-        barCount: bars,
-        barLengthMeters: barLen,
-        existingDetail: newSubtitulo,
-      });
       setNewUnid('barras');
-      setNewSubtitulo(detailText);
-      return { barras: bars, barLen, requestedMl: preservedMl, detailText };
+      return { barras: bars, barLen, requestedMl: preservedMl, detailText: manualDetail };
     }
 
     const result = convertMetrosToBarras(rawVal, selectedProductCatalog, barLen);
     if (result && result.barras > 0) {
-      const detailText = formatRodapeDetailText({
-        requestedMl: result.metros,
-        barCount: result.barras,
-        barLengthMeters: result.barLen,
-        existingDetail: newSubtitulo,
-      });
       rodapeRequestedMlRef.current = result.metros;
       rodapeLastBarrasRef.current = result.barras;
       setNewQtd(String(result.barras));
       setNewUnid('barras');
-      setNewSubtitulo(detailText);
       return {
         barras: result.barras,
         barLen: result.barLen,
         requestedMl: result.metros,
-        detailText,
+        detailText: manualDetail,
       };
     }
 
@@ -2235,26 +2213,15 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
       const barLen = extractBarLengthFromProductName(prod.name, 2.4);
       const explicitBars = parseBarCountFromInput(prod.quantity);
       const parsedFromSub = parseRodapeDetails(prod.subtitulo)?.metrosDesejados;
+      finalSubtitulo = stripRodapeAutoDetail(prod.subtitulo);
       if (requestedRodapeMl && requestedRodapeMl > 0) {
         const calc = calculateRodapeBarras(requestedRodapeMl, barLen, safeProdPrice);
         finalNumQtd = calc.barrasNecessarias || 1;
         finalQtyDisplay = String(finalNumQtd);
-        finalSubtitulo = formatRodapeDetailText({
-          requestedMl: requestedRodapeMl,
-          barCount: finalNumQtd,
-          barLengthMeters: barLen,
-          existingDetail: prod.subtitulo,
-        });
       } else if (explicitBars && explicitBars > 0) {
         finalNumQtd = explicitBars;
         finalQtyDisplay = String(explicitBars);
         requestedRodapeMl = Math.round(explicitBars * barLen * 100) / 100;
-        finalSubtitulo = formatRodapeDetailText({
-          requestedMl: requestedRodapeMl,
-          barCount: finalNumQtd,
-          barLengthMeters: barLen,
-          existingDetail: prod.subtitulo,
-        });
       } else if (parsedFromSub && parsedFromSub > 0) {
         requestedRodapeMl = parsedFromSub;
       } else if (rawNumQtd > 0) {
@@ -2263,12 +2230,6 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
           finalNumQtd = rodConv.barras;
           finalQtyDisplay = String(rodConv.barras);
           requestedRodapeMl = rodConv.metros;
-          finalSubtitulo = formatRodapeDetailText({
-            requestedMl: rodConv.metros,
-            barCount: rodConv.barras,
-            barLengthMeters: rodConv.barLen,
-            existingDetail: prod.subtitulo,
-          });
         }
       }
     } else if (isTeto && rawNumQtd > 0) {
@@ -2415,28 +2376,17 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     } else if (isRodape) {
       const barLen = extractBarLengthFromProductName(newProd.name, 2.4);
       const explicitBars = parseBarCountFromInput(initialQty) || parseBarCountFromInput(initialDetail);
+      finalDetail = stripRodapeAutoDetail(initialDetail) || undefined;
       if (explicitBars && explicitBars > 0) {
         finalNumQtd = explicitBars;
         finalQtyDisplay = String(explicitBars);
         requestedRodapeMl = Math.round(explicitBars * barLen * 100) / 100;
-        finalDetail = formatRodapeDetailText({
-          requestedMl: requestedRodapeMl,
-          barCount: explicitBars,
-          barLengthMeters: barLen,
-          existingDetail: initialDetail,
-        });
       } else {
         const rodConv = convertMetrosToBarras(finalQtyDisplay, newProd.name, barLen);
         if (rodConv && rodConv.barras > 0) {
           finalNumQtd = rodConv.barras;
           finalQtyDisplay = String(rodConv.barras);
           requestedRodapeMl = rodConv.metros;
-          finalDetail = formatRodapeDetailText({
-            requestedMl: rodConv.metros,
-            barCount: rodConv.barras,
-            barLengthMeters: rodConv.barLen,
-            existingDetail: initialDetail,
-          });
         }
       }
       finalUnit = 'barras';
@@ -3978,6 +3928,9 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   type OrcamentoActionType = 'pdf' | 'image' | 'image_jpg' | 'print' | 'copy_image' | 'whatsapp' | 'save';
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const [imageCopiedBadge, setImageCopiedBadge] = useState(false);
+  const copiedBadgeTimerRef = useRef<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [activeActionType, setActiveActionType] = useState<OrcamentoActionType | null>(null);
@@ -3990,8 +3943,6 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   // Tema visual local do Espelho Oficial (não altera o tema global do sistema nem duplica registros)
   const [localEspelhoThemeId, setLocalEspelhoThemeId] = useState<FenixThemeId | null>(null);
   const [localEspelhoVariant, setLocalEspelhoVariant] = useState<BudgetThemeVariant | null>(null);
-  const [isImageFormatMenuOpen, setIsImageFormatMenuOpen] = useState(false);
-  const imageFormatMenuRef = useRef<HTMLDivElement>(null);
   const activeBudgetThemeSnapshot = useFenixTheme('orcamento');
   const effectiveEspelhoThemeId: FenixThemeId =
     localEspelhoThemeId ?? activeBudgetThemeSnapshot.theme.id;
@@ -4031,15 +3982,11 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   }, [initialOrcamento]);
 
   useEffect(() => {
-    if (!isImageFormatMenuOpen) return;
-    const handleOutside = (e: MouseEvent) => {
-      if (imageFormatMenuRef.current && !imageFormatMenuRef.current.contains(e.target as Node)) {
-        setIsImageFormatMenuOpen(false);
-      }
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      if (copiedBadgeTimerRef.current) window.clearTimeout(copiedBadgeTimerRef.current);
     };
-    document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
-  }, [isImageFormatMenuOpen]);
+  }, []);
 
   const getCurrentBudgetFingerprint = () =>
     JSON.stringify({
@@ -4063,9 +4010,15 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
       exibirQuantidade,
     });
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, durationMs = 4000) => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, durationMs);
   };
 
   const resolveClientAddressString = (cli?: ClientRecord | null, fallbackOrc?: SavedOrcamento | null): string => {
@@ -4555,11 +4508,59 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   const handleSaveOrcamento = () => executeSaveAndAction('save');
   const handlePrintPdf = () => executeSaveAndAction('print');
   const handleDownloadPdf = () => executeSaveAndAction('pdf');
-  const handleDownloadImage = (format: 'png' | 'jpg' = 'png') => {
-    setIsImageFormatMenuOpen(false);
-    executeSaveAndAction(format === 'jpg' ? 'image_jpg' : 'image');
+  const handleDownloadImage = async () => {
+    if (isExporting || actionLockRef.current) return;
+    const element = document.getElementById('espelho-oficial-orcamento');
+    if (!element) {
+      showToast('Espelho oficial do orçamento não encontrado na tela.', 2500);
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      setActiveActionType('image');
+      const filename = getOrcamentoExportFileName(clientName, dataOrcamento, 'png');
+      await exportEspelhoToImage(element, filename, 'png');
+      showToast('✓ Imagem baixada!', 2400);
+    } catch (err) {
+      console.error('Erro ao baixar imagem:', err);
+      showToast('Não foi possível baixar a imagem diretamente.', 3000);
+    } finally {
+      setActiveActionType(null);
+      setIsExporting(false);
+    }
   };
-  const handleCopyImageFromEditor = () => executeSaveAndAction('copy_image');
+  const handleCopyImageFromEditor = async () => {
+    if (isExporting || actionLockRef.current) return;
+    const element = document.getElementById('espelho-oficial-orcamento');
+    if (!element) {
+      showToast('Espelho oficial do orçamento não encontrado na tela.', 2500);
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      setActiveActionType('copy_image');
+      const copied = await copyEspelhoImageToClipboard(element);
+      if (copied) {
+        if (copiedBadgeTimerRef.current) window.clearTimeout(copiedBadgeTimerRef.current);
+        setImageCopiedBadge(true);
+        copiedBadgeTimerRef.current = window.setTimeout(() => {
+          setImageCopiedBadge(false);
+          copiedBadgeTimerRef.current = null;
+        }, 2200);
+        showToast('✓ Imagem copiada! Cole no WhatsApp (Ctrl+V).', 2500);
+      } else {
+        showToast('Não foi possível acessar a área de transferência.', 2800);
+      }
+    } catch (err) {
+      console.warn('Falha ao copiar imagem:', err);
+      showToast('Não foi possível copiar a imagem diretamente.', 2800);
+    } finally {
+      setActiveActionType(null);
+      setIsExporting(false);
+    }
+  };
   const handleSendWhatsApp = () => executeSaveAndAction('whatsapp');
 
   // Opção FINALIZAR na Janela de Decisão:
@@ -4869,8 +4870,8 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 space-y-8">
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="fixed top-20 right-5 z-50 p-4 rounded-2xl bg-[#003865] text-white shadow-xl flex items-center gap-3 animate-in fade-in duration-200">
-          <CheckCircle2 className="w-5 h-5 text-sky-400 flex-shrink-0" />
+        <div className="pointer-events-none fixed top-20 right-5 z-50 px-4 py-2.5 rounded-xl bg-[#003865] text-white shadow-lg flex items-center gap-2.5 animate-in fade-in duration-150">
+          <CheckCircle2 className="w-4 h-4 text-sky-400 flex-shrink-0" />
           <span className="text-xs sm:text-sm font-semibold">{toastMessage}</span>
         </div>
       )}
@@ -7211,51 +7212,21 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
               </span>
             </button>
 
-            {/* Baixar Orçamento como Imagem (PNG ou JPG) */}
-            <div ref={imageFormatMenuRef} className="relative inline-block">
-              <button
-                type="button"
-                disabled={isSaving || isExporting || activeActionType !== null}
-                onClick={() => setIsImageFormatMenuOpen((prev) => !prev)}
-                className="h-11 px-4 sm:px-5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-[#0057ff] font-bold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
-                title="Baixar imagem em PNG ou JPG exatamente igual à pré-visualização"
-              >
-                {activeActionType === 'image' || activeActionType === 'image_jpg' ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                <span>
-                  {activeActionType === 'image' || activeActionType === 'image_jpg'
-                    ? isExporting
-                      ? 'Exportando...'
-                      : 'Salvando...'
-                    : 'Baixar Imagem'}
-                </span>
-                <ChevronDown className="w-3.5 h-3.5" />
-              </button>
-
-              {isImageFormatMenuOpen && (
-                <div className="absolute right-0 bottom-full mb-2 w-48 bg-white rounded-xl border border-slate-200 shadow-xl z-50 p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadImage('png')}
-                    className="w-full px-3 py-2.5 rounded-lg hover:bg-blue-50 text-left text-xs font-bold text-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <ImageIcon className="w-4 h-4 text-[#0057ff]" />
-                    <span>Baixar PNG (.png)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadImage('jpg')}
-                    className="w-full px-3 py-2.5 rounded-lg hover:bg-blue-50 text-left text-xs font-bold text-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <ImageIcon className="w-4 h-4 text-emerald-600" />
-                    <span>Baixar JPG (.jpg)</span>
-                  </button>
-                </div>
+            {/* Baixar Orçamento como Imagem (download imediato com nome padrão) */}
+            <button
+              type="button"
+              disabled={isSaving || isExporting || activeActionType !== null}
+              onClick={handleDownloadImage}
+              className="h-11 px-4 sm:px-5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-[#0057ff] font-bold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+              title="Baixar imagem completa do orçamento imediatamente"
+            >
+              {activeActionType === 'image' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
               )}
-            </div>
+              <span>{activeActionType === 'image' ? 'Baixando...' : 'Baixar Imagem'}</span>
+            </button>
 
             {/* Imprimir Orçamento */}
             <button
@@ -7273,26 +7244,26 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
               <span>{activeActionType === 'print' ? 'Salvando...' : 'Imprimir'}</span>
             </button>
 
-            {/* Copiar Imagem do Espelho */}
+            {/* Copiar Imagem do Espelho (cópia imediata para WhatsApp Ctrl+V) */}
             <button
               type="button"
               disabled={isSaving || isExporting || activeActionType !== null}
               onClick={handleCopyImageFromEditor}
-              className="h-11 px-4 sm:px-5 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
-              title="Salvar e copiar imagem exata do espelho para área de transferência (Ctrl+V no WhatsApp)"
+              className={`h-11 px-4 sm:px-5 rounded-xl border font-bold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs ${
+                imageCopiedBadge
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700'
+              }`}
+              title="Copiar imagem completa do orçamento para colar no WhatsApp (Ctrl+V)"
             >
               {activeActionType === 'copy_image' ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
+              ) : imageCopiedBadge ? (
+                <Check className="w-4 h-4" />
               ) : (
                 <Copy className="w-4 h-4" />
               )}
-              <span>
-                {activeActionType === 'copy_image'
-                  ? isExporting
-                    ? 'Copiando...'
-                    : 'Salvando...'
-                  : 'Copiar Imagem'}
-              </span>
+              <span>{imageCopiedBadge ? 'Imagem copiada!' : 'Copiar Imagem'}</span>
             </button>
 
             {/* Enviar pelo WhatsApp */}

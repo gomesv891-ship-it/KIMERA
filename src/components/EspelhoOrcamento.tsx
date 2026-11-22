@@ -15,7 +15,6 @@ import {
   CustomThemeConfig,
   FenixThemeId,
   getThemeDefinition,
-  supportsDecoratedVariant,
   useFenixTheme,
 } from '../utils/themeService';
 import {
@@ -31,6 +30,21 @@ import {
   NATAL_DECORADO_BOTTOM_ART_BASE64,
   NATAL_DECORADO_HEADER_ART_BASE64,
 } from '../assets/natalDecoradoAssets';
+import {
+  ANO_NOVO_BOTTOM_ART_BASE64,
+  ANO_NOVO_HEADER_BG_BASE64,
+  ANO_NOVO_HEADER_CORNER_BASE64,
+} from '../assets/anoNovoAssets';
+import {
+  DIA_MAES_BOTTOM_ART_BASE64,
+  DIA_MAES_HEADER_BG_BASE64,
+  DIA_MAES_HEADER_CORNER_BASE64,
+} from '../assets/diaDasMaesAssets';
+import {
+  DIA_PAIS_BOTTOM_ART_BASE64,
+  DIA_PAIS_HEADER_BG_BASE64,
+  DIA_PAIS_HEADER_CORNER_BASE64,
+} from '../assets/diaDosPaisAssets';
 
 export interface EspelhoItem {
   id: string;
@@ -129,10 +143,11 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
     ? getThemeDefinition(previewThemeId, previewCustomTheme)
     : activeBudgetTheme.theme;
 
-  const isDecorated =
-    Boolean(previewDecorated ?? previewShowDecorations) &&
-    supportsDecoratedVariant(theme.id);
-  const isNatalDecorado = isDecorated && theme.id === 'natal';
+  const isNatalDecorado = theme.id === 'natal';
+  const isAnoNovo = theme.id === 'ano_novo';
+  const isDiaDasMaes = theme.id === 'dia_das_maes';
+  const isDiaDosPais = theme.id === 'dia_dos_pais';
+  const isDecorated = isNatalDecorado;
 
   const b = theme.budget;
 
@@ -163,7 +178,7 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
     <div
       id={id}
       data-fenix-budget-theme={theme.id}
-      data-fenix-budget-variant={isDecorated ? 'decorado' : 'classico'}
+      data-fenix-budget-variant="classico"
       className="relative w-full min-w-[960px] max-w-[1040px] mx-auto bg-white text-slate-900 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border overflow-hidden select-none print:shadow-none print:rounded-none print:min-w-full"
       style={{
         fontFamily: "'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif",
@@ -176,9 +191,30 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
       {/* =================================================================== */}
       {/* 1. CABEÇALHO OFICIAL PREMIUM — REPRODUÇÃO FIEL DO MODELO MESTRE     */}
       {/* =================================================================== */}
-      <div className="relative w-full overflow-hidden flex items-stretch justify-between min-h-[116px]">
-        {/* Fundo SVG Curvo Oficial PREMIUM (ou Curva Exata da Referência no Natal Decorado) */}
-        {isNatalDecorado ? (
+      <div
+        className={`relative w-full flex items-stretch justify-between ${
+          isAnoNovo || isDiaDasMaes || isDiaDosPais
+            ? 'min-h-[118px]'
+            : 'overflow-hidden min-h-[116px]'
+        }`}
+      >
+        {/* Fundo SVG Curvo Oficial PREMIUM (ou Arte Exata da Referência no Natal / Ano Novo / Dia das Mães / Dia dos Pais) */}
+        {isAnoNovo || isDiaDasMaes || isDiaDosPais ? (
+          <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
+            <img
+              src={
+                isDiaDasMaes
+                  ? DIA_MAES_HEADER_BG_BASE64
+                  : isDiaDosPais
+                  ? DIA_PAIS_HEADER_BG_BASE64
+                  : ANO_NOVO_HEADER_BG_BASE64
+              }
+              alt=""
+              aria-hidden="true"
+              className="w-full h-full object-fill block"
+            />
+          </div>
+        ) : isNatalDecorado ? (
           <NatalDecoradoHeaderWaveSvg uid={uid} />
         ) : (
         <svg
@@ -273,7 +309,9 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
         {/* Lado Esquerdo: Logo Oficial Fênix World (100% ORIGINAL) + Dados da Empresa */}
         <div
           className={`relative z-10 flex items-center gap-4 sm:gap-5 py-3.5 px-6 sm:px-7 min-w-0 flex-1 ${
-            isDecorated ? 'max-w-[calc(100%-465px)]' : 'max-w-[calc(100%-390px)]'
+            isDecorated || isAnoNovo || isDiaDasMaes || isDiaDosPais
+              ? 'max-w-[calc(100%-465px)]'
+              : 'max-w-[calc(100%-390px)]'
           }`}
         >
           {/* Logo Oficial Fênix World sem filtros, sem recoloração, mantendo proporções originais */}
@@ -321,12 +359,12 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
 
         {/* Lado Direito: Ícone + Divisória + Título ORÇAMENTO e Data */}
         <div
-          className={`relative z-10 flex items-center justify-end gap-4 py-4 flex-shrink-0 ${
-            isNatalDecorado
-              ? 'pr-40 sm:pr-44 pl-4'
+          className={`relative flex items-center justify-end gap-4 py-4 flex-shrink-0 ${
+            isNatalDecorado || isAnoNovo || isDiaDasMaes || isDiaDosPais
+              ? 'z-[13] pr-32 sm:pr-[150px] pl-4'
               : isDecorated
-              ? 'pr-36 sm:pr-40 pl-4'
-              : 'pr-7 sm:pr-9 pl-6'
+              ? 'z-10 pr-36 sm:pr-40 pl-4'
+              : 'z-10 pr-7 sm:pr-9 pl-6'
           }`}
         >
           {/* Ícone Arredondado com 3 Barras */}
@@ -334,7 +372,13 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
             className="w-11 h-11 rounded-[11px] border-[1.8px] flex flex-col items-center justify-center gap-[4.5px] px-2.5 flex-shrink-0"
             style={{
               borderColor: b.bannerIconBorder,
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+              backgroundColor: isAnoNovo
+                ? 'rgba(4, 28, 66, 0.55)'
+                : isDiaDasMaes
+                ? 'rgba(110, 8, 34, 0.45)'
+                : isDiaDosPais
+                ? 'rgba(0, 24, 72, 0.55)'
+                : 'rgba(255, 255, 255, 0.06)',
             }}
           >
             <div
@@ -382,6 +426,32 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Pontas decorativas no canto superior direito (Ano Novo / Dia das Mães) */}
+        {isAnoNovo && (
+          <img
+            src={ANO_NOVO_HEADER_CORNER_BASE64}
+            alt=""
+            aria-hidden="true"
+            className="absolute top-[calc(100%-1px)] right-0 w-[15.88%] h-auto pointer-events-none select-none z-[12]"
+          />
+        )}
+        {isDiaDasMaes && (
+          <img
+            src={DIA_MAES_HEADER_CORNER_BASE64}
+            alt=""
+            aria-hidden="true"
+            className="absolute top-[calc(100%-1px)] right-0 w-[15.09%] h-auto pointer-events-none select-none z-[12]"
+          />
+        )}
+        {isDiaDosPais && (
+          <img
+            src={DIA_PAIS_HEADER_CORNER_BASE64}
+            alt=""
+            aria-hidden="true"
+            className="absolute top-[calc(100%-1px)] right-0 w-[11.42%] h-auto pointer-events-none select-none z-[12]"
+          />
+        )}
       </div>
 
       {/* Composição exata do canto superior direito do Natal Decorado (galhos, laço, sinos e bola) */}
@@ -814,19 +884,56 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
                   <stop offset="48%" stopColor={isNatalDecorado ? '#a60d13' : b.totalBoxWaveMid} />
                   <stop offset="100%" stopColor={isNatalDecorado ? '#7b0102' : b.totalBoxWaveEnd} />
                 </linearGradient>
+                {(isAnoNovo || isDiaDasMaes || isDiaDosPais) && (
+                  <>
+                    <linearGradient id={`tot-an-gold-${uid}`} x1="130" y1="60" x2="245" y2="0" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stopColor="#9a6b16" />
+                      <stop offset="30%" stopColor="#f5d061" />
+                      <stop offset="55%" stopColor="#fef9c3" />
+                      <stop offset="80%" stopColor="#e5b84b" />
+                      <stop offset="100%" stopColor="#a8761c" />
+                    </linearGradient>
+                    <radialGradient id={`tot-an-flare-${uid}`} cx="50%" cy="50%" r="50%">
+                      <stop offset="0%" stopColor="#fef9c3" stopOpacity="0.9" />
+                      <stop offset="45%" stopColor="#f5d061" stopOpacity="0.4" />
+                      <stop offset="100%" stopColor="#f5d061" stopOpacity="0" />
+                    </radialGradient>
+                  </>
+                )}
               </defs>
               <rect x="0" y="0" width="400" height="60" fill={`url(#tot-left-${uid})`} />
               <path
-                d="M 142 60 C 175 44, 198 10, 234 0 L 400 0 L 400 60 Z"
+                d={
+                  isAnoNovo || isDiaDasMaes || isDiaDosPais
+                    ? 'M 136 60 C 172 46, 198 10, 236 0 L 400 0 L 400 60 Z'
+                    : 'M 142 60 C 175 44, 198 10, 234 0 L 400 0 L 400 60 Z'
+                }
                 fill={`url(#tot-wave-${uid})`}
               />
-              <path
-                d="M 142 60 C 175 44, 198 10, 234 0"
-                stroke={b.totalBoxGlow}
-                strokeWidth="2"
-                strokeOpacity="0.65"
-                fill="none"
-              />
+              {isAnoNovo || isDiaDasMaes || isDiaDosPais ? (
+                <>
+                  <path
+                    d="M 128 60 C 166 47, 196 10, 235 0 L 248 0 C 209 12, 179 49, 146 60 Z"
+                    fill={`url(#tot-an-gold-${uid})`}
+                  />
+                  <path
+                    d="M 130 60 C 168 47, 197 10, 236 0"
+                    stroke="#fffbeb"
+                    strokeWidth="1.2"
+                    strokeOpacity="0.85"
+                    fill="none"
+                  />
+                  <circle cx="186" cy="40" r="18" fill={`url(#tot-an-flare-${uid})`} />
+                </>
+              ) : (
+                <path
+                  d="M 142 60 C 175 44, 198 10, 234 0"
+                  stroke={b.totalBoxGlow}
+                  strokeWidth="2"
+                  strokeOpacity="0.65"
+                  fill="none"
+                />
+              )}
             </svg>
 
             {isDecorated && <EspelhoTotalBoxDecorations themeId={theme.id} uid={uid} />}
@@ -959,6 +1066,33 @@ export const EspelhoOrcamento: React.FC<EspelhoOrcamentoProps> = ({
         <div className="relative w-full h-[78px] leading-none bg-white pointer-events-none select-none">
           <img
             src={NATAL_DECORADO_BOTTOM_ART_BASE64}
+            alt=""
+            aria-hidden="true"
+            className="absolute bottom-0 left-0 right-0 w-full h-auto block pointer-events-none select-none z-[5]"
+          />
+        </div>
+      ) : isAnoNovo ? (
+        <div className="relative w-full h-[78px] leading-none bg-white pointer-events-none select-none">
+          <img
+            src={ANO_NOVO_BOTTOM_ART_BASE64}
+            alt=""
+            aria-hidden="true"
+            className="absolute bottom-0 left-0 right-0 w-full h-auto block pointer-events-none select-none z-[5]"
+          />
+        </div>
+      ) : isDiaDasMaes ? (
+        <div className="relative w-full h-[84px] leading-none bg-white pointer-events-none select-none">
+          <img
+            src={DIA_MAES_BOTTOM_ART_BASE64}
+            alt=""
+            aria-hidden="true"
+            className="absolute bottom-0 left-0 right-0 w-full h-auto block pointer-events-none select-none z-[5]"
+          />
+        </div>
+      ) : isDiaDosPais ? (
+        <div className="relative w-full h-[84px] leading-none bg-white pointer-events-none select-none">
+          <img
+            src={DIA_PAIS_BOTTOM_ART_BASE64}
             alt=""
             aria-hidden="true"
             className="absolute bottom-0 left-0 right-0 w-full h-auto block pointer-events-none select-none z-[5]"

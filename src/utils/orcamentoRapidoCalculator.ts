@@ -19,7 +19,6 @@ import {
   calculateRodapeBarras,
   calculateRodapeInsumosForOrcamento,
   extractBarLengthFromProductName,
-  formatRodapeDetailText,
 } from './rodapeCalculator';
 import { resolveProductCalcRule } from './productCalcRules';
 
@@ -909,11 +908,6 @@ export function buildQuickCategoryItems(params: {
       id: rodapeItemId,
       qtd: String(calc.barrasNecessarias),
       descricao: prod.name,
-      subtitulo: formatRodapeDetailText({
-        requestedMl: reqMl,
-        barCount: calc.barrasNecessarias,
-        barLengthMeters: barLen,
-      }),
       unidade: prod.unit || 'barras',
       precoUnitario: unitPrice,
       total: Math.round(calc.barrasNecessarias * unitPrice * 100) / 100,

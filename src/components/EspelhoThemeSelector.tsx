@@ -121,7 +121,7 @@ export const EspelhoThemeSelector: React.FC<EspelhoThemeSelectorProps> = ({
                 Tema deste Orçamento
               </p>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Escolha Clássico ou Decorado somente para este espelho
+                Escolha o tema visual somente para este espelho
               </p>
             </div>
             {hasOverride && (

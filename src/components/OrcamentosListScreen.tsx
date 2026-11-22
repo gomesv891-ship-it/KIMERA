@@ -226,10 +226,9 @@ export const OrcamentosListScreen: React.FC<OrcamentosListScreenProps> = ({
 
     try {
       setIsExporting(true);
-      showToast('Gerando imagem em alta resolução...');
       const filename = getOrcamentoExportFileName(orc.clientName, orc.dataOrcamento, format);
       await exportEspelhoToImage(element, filename, format);
-      showToast(`Imagem ${format.toUpperCase()} baixada com sucesso!`);
+      showToast('✓ Imagem baixada!');
     } catch (err) {
       console.error('Erro ao baixar imagem:', err);
       showToast('Erro ao exportar imagem.');
@@ -248,16 +247,15 @@ export const OrcamentosListScreen: React.FC<OrcamentosListScreenProps> = ({
 
     try {
       setIsExporting(true);
-      showToast('Copiando imagem do espelho...');
       const copied = await copyEspelhoImageToClipboard(element);
       if (copied) {
-        showToast('✓ Imagem copiada com fidelidade total! Cole no WhatsApp (Ctrl+V).');
+        showToast('✓ Imagem copiada! Cole no WhatsApp (Ctrl+V).');
       } else {
-        showToast('✓ Imagem gerada! Utilize "Baixar Imagem" caso seu navegador restrinja colar direto.');
+        showToast('Não foi possível acessar a área de transferência.');
       }
     } catch (err) {
       console.warn('Falha ao copiar imagem para a área de transferência:', err);
-      showToast('✓ Dica: Pressione "Baixar Imagem" para salvar o arquivo do orçamento.');
+      showToast('Não foi possível copiar a imagem diretamente.');
     } finally {
       setIsExporting(false);
     }

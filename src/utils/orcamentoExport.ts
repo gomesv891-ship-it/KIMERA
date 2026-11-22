@@ -1,4 +1,4 @@
-import { toPng } from 'html-to-image';
+import { toBlob, toPng } from 'html-to-image';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { runWithPdfThemeExport } from './themeService';
@@ -89,9 +89,11 @@ function sanitizeClonedNodeColorsForHtml2Canvas(originalRoot: HTMLElement, clone
   }
 }
 
-export async function captureEspelhoToPng(element: HTMLElement): Promise<EspelhoCaptureResult> {
-  await waitForVisualSettlement();
-
+function getCaptureMetrics(element: HTMLElement): {
+  captureWidth: number;
+  captureHeight: number;
+  captureStyle: Partial<CSSStyleDeclaration>;
+} {
   const rect = element.getBoundingClientRect();
   const captureWidth = Math.max(
     Math.round(element.offsetWidth || rect.width || element.scrollWidth || 1040),
@@ -111,6 +113,117 @@ export async function captureEspelhoToPng(element: HTMLElement): Promise<Espelho
     maxWidth: `${captureWidth}px`,
     overflow: 'hidden',
   };
+
+  return { captureWidth, captureHeight, captureStyle };
+}
+
+async function renderElementViaHtml2Canvas(
+  element: HTMLElement,
+  captureWidth: number,
+  captureHeight: number
+): Promise<HTMLCanvasElement> {
+  return html2canvas(element, {
+    scale: 2,
+    useCORS: true,
+    allowTaint: true,
+    backgroundColor: '#ffffff',
+    logging: false,
+    width: captureWidth,
+    height: captureHeight,
+    windowWidth: captureWidth,
+    windowHeight: captureHeight,
+    scrollX: 0,
+    scrollY: 0,
+    onclone: (clonedDoc) => {
+      const clonedEl = element.id
+        ? clonedDoc.getElementById(element.id)
+        : (clonedDoc.body.firstElementChild as HTMLElement | null);
+      if (clonedEl) {
+        clonedEl.style.margin = '0';
+        clonedEl.style.transform = 'none';
+        clonedEl.style.boxShadow = 'none';
+        clonedEl.style.width = `${captureWidth}px`;
+        clonedEl.style.minWidth = `${captureWidth}px`;
+        clonedEl.style.maxWidth = `${captureWidth}px`;
+        clonedEl.style.overflow = 'hidden';
+        sanitizeClonedNodeColorsForHtml2Canvas(element, clonedEl);
+      }
+    },
+  });
+}
+
+export async function captureEspelhoToBlob(
+  element: HTMLElement,
+  options?: { skipSettlementDelay?: boolean }
+): Promise<{ blob: Blob; width: number; height: number }> {
+  if (!options?.skipSettlementDelay) {
+    await waitForVisualSettlement();
+  } else if (typeof document !== 'undefined' && document.fonts?.status !== 'loaded' && document.fonts?.ready) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      // ignore font loading error
+    }
+  }
+
+  const { captureWidth, captureHeight, captureStyle } = getCaptureMetrics(element);
+
+  try {
+    const blob = await toBlob(element, {
+      quality: 1.0,
+      pixelRatio: 2,
+      backgroundColor: '#ffffff',
+      cacheBust: false,
+      width: captureWidth,
+      height: captureHeight,
+      canvasWidth: captureWidth * 2,
+      canvasHeight: captureHeight * 2,
+      style: captureStyle,
+    });
+    if (blob) {
+      return { blob, width: captureWidth, height: captureHeight };
+    }
+    throw new Error('Blob vazio ao capturar imagem');
+  } catch (errWithFonts) {
+    try {
+      const blob = await toBlob(element, {
+        quality: 1.0,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+        cacheBust: false,
+        skipFonts: true,
+        width: captureWidth,
+        height: captureHeight,
+        canvasWidth: captureWidth * 2,
+        canvasHeight: captureHeight * 2,
+        style: captureStyle,
+      });
+      if (blob) {
+        return { blob, width: captureWidth, height: captureHeight };
+      }
+      throw new Error('Blob vazio sem fontes ao capturar imagem');
+    } catch (errSkipFonts) {
+      console.warn('toBlob falhou, utilizando fallback html2canvas:', errWithFonts, errSkipFonts);
+      const canvas = await renderElementViaHtml2Canvas(element, captureWidth, captureHeight);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (result) => {
+            if (result) resolve(result);
+            else reject(new Error('Falha ao converter canvas em PNG'));
+          },
+          'image/png',
+          1.0
+        );
+      });
+      return { blob, width: captureWidth, height: captureHeight };
+    }
+  }
+}
+
+export async function captureEspelhoToPng(element: HTMLElement): Promise<EspelhoCaptureResult> {
+  await waitForVisualSettlement();
+
+  const { captureWidth, captureHeight, captureStyle } = getCaptureMetrics(element);
 
   try {
     const pngDataUrl = await toPng(element, {
@@ -142,34 +255,7 @@ export async function captureEspelhoToPng(element: HTMLElement): Promise<Espelho
       return { pngDataUrl, width: captureWidth, height: captureHeight };
     } catch (errSkipFonts) {
       console.warn('toPng falhou, utilizando fallback html2canvas:', errWithFonts, errSkipFonts);
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        width: captureWidth,
-        height: captureHeight,
-        windowWidth: captureWidth,
-        windowHeight: captureHeight,
-        scrollX: 0,
-        scrollY: 0,
-        onclone: (clonedDoc) => {
-          const clonedEl = element.id
-            ? clonedDoc.getElementById(element.id)
-            : (clonedDoc.body.firstElementChild as HTMLElement | null);
-          if (clonedEl) {
-            clonedEl.style.margin = '0';
-            clonedEl.style.transform = 'none';
-            clonedEl.style.boxShadow = 'none';
-            clonedEl.style.width = `${captureWidth}px`;
-            clonedEl.style.minWidth = `${captureWidth}px`;
-            clonedEl.style.maxWidth = `${captureWidth}px`;
-            clonedEl.style.overflow = 'hidden';
-            sanitizeClonedNodeColorsForHtml2Canvas(element, clonedEl);
-          }
-        },
-      });
+      const canvas = await renderElementViaHtml2Canvas(element, captureWidth, captureHeight);
       return {
         pngDataUrl: canvas.toDataURL('image/png'),
         width: captureWidth,
@@ -205,13 +291,22 @@ export async function convertPngDataUrlToJpg(pngDataUrl: string, quality = 0.96)
   });
 }
 
-function triggerDataUrlDownload(dataUrl: string, filename: string): void {
+function triggerDataUrlDownload(href: string, filename: string): void {
   const link = document.createElement('a');
-  link.href = dataUrl;
+  link.href = href;
   link.download = filename;
+  link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  triggerDataUrlDownload(objectUrl, filename);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 10000);
 }
 
 export async function exportEspelhoToImage(
@@ -219,24 +314,41 @@ export async function exportEspelhoToImage(
   filename: string,
   format: 'png' | 'jpg' = 'png'
 ): Promise<void> {
-  const { pngDataUrl } = await captureEspelhoToPng(element);
+  const { blob } = await captureEspelhoToBlob(element, { skipSettlementDelay: true });
   if (format === 'jpg') {
-    const jpgDataUrl = await convertPngDataUrlToJpg(pngDataUrl, 0.96);
-    triggerDataUrlDownload(jpgDataUrl, filename);
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const jpgDataUrl = await convertPngDataUrlToJpg(objectUrl, 0.96);
+      triggerDataUrlDownload(jpgDataUrl, filename);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   } else {
-    triggerDataUrlDownload(pngDataUrl, filename);
+    triggerBlobDownload(blob, filename);
   }
 }
 
 export async function copyEspelhoImageToClipboard(element: HTMLElement): Promise<boolean> {
-  const { pngDataUrl } = await captureEspelhoToPng(element);
-  const res = await fetch(pngDataUrl);
-  const blob = await res.blob();
-  if (blob && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+  if (typeof navigator === 'undefined' || !navigator.clipboard || typeof ClipboardItem === 'undefined') {
+    return false;
+  }
+
+  const blobPromise = captureEspelhoToBlob(element, { skipSettlementDelay: true }).then((res) => res.blob);
+
+  try {
+    // Passa a Promise<Blob> diretamente para preservar a ativação do usuário durante a captura
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blobPromise }),
+    ]);
+    return true;
+  } catch {
+    const blob = await blobPromise;
+    if (!blob) return false;
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blob }),
+    ]);
     return true;
   }
-  return false;
 }
 
 export async function exportEspelhoToPdf(element: HTMLElement, filename: string): Promise<void> {

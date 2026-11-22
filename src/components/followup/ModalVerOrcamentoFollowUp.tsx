@@ -11,8 +11,7 @@ import {
   ArrowRight,
   Edit3,
   Printer,
-  ChevronDown,
-  Image as ImageIcon,
+  Check,
 } from 'lucide-react';
 import { SavedOrcamento, FollowUpItem } from '../../types';
 import { EspelhoOrcamento } from '../EspelhoOrcamento';
@@ -54,10 +53,9 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
   origin = 'follow-up',
 }) => {
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [imageCopiedBadge, setImageCopiedBadge] = useState<boolean>(false);
   const [localEspelhoThemeId, setLocalEspelhoThemeId] = useState<FenixThemeId | null>(null);
   const [localEspelhoVariant, setLocalEspelhoVariant] = useState<BudgetThemeVariant | null>(null);
-  const [isImageMenuOpen, setIsImageMenuOpen] = useState<boolean>(false);
-  const imageMenuRef = useRef<HTMLDivElement>(null);
 
   const activeBudgetTheme = useFenixTheme('orcamento');
   const effectiveEspelhoThemeId: FenixThemeId =
@@ -72,17 +70,6 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
     setLocalEspelhoThemeId(null);
     setLocalEspelhoVariant(null);
   }, [selectedOrcamento.id]);
-
-  useEffect(() => {
-    if (!isImageMenuOpen) return;
-    const handleOutside = (e: MouseEvent) => {
-      if (imageMenuRef.current && !imageMenuRef.current.contains(e.target as Node)) {
-        setIsImageMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
-  }, [isImageMenuOpen]);
 
   const getEspelhoElement = () =>
     document.getElementById('espelho-oficial-orcamento') ||
@@ -114,9 +101,9 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
     }
   };
 
-  // 2. Download da Imagem em alta resolução (PNG ou JPG)
-  const handleDownloadImage = async (format: 'png' | 'jpg' = 'png') => {
-    setIsImageMenuOpen(false);
+  // 2. Download imediato da Imagem em alta resolução (PNG com nome padrão)
+  const handleDownloadImage = async () => {
+    if (isExporting) return;
     const element = getEspelhoElement();
     if (!element) {
       showToast('Espelho do orçamento não encontrado na tela.');
@@ -125,14 +112,13 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
 
     try {
       setIsExporting(true);
-      showToast(`Gerando imagem ${format.toUpperCase()} em alta resolução...`);
       const filename = getOrcamentoExportFileName(
         selectedOrcamento.clientName,
         selectedOrcamento.dataOrcamento,
-        format
+        'png'
       );
-      await exportEspelhoToImage(element, filename, format);
-      showToast(`✓ Imagem ${format.toUpperCase()} baixada com sucesso!`);
+      await exportEspelhoToImage(element, filename, 'png');
+      showToast('✓ Imagem baixada!');
     } catch (err) {
       console.error('Erro ao baixar imagem:', err);
       showToast('Erro ao exportar imagem.');
@@ -143,6 +129,7 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
 
   // 3. Copiar Imagem para o WhatsApp (Ctrl+V)
   const handleCopyImage = async () => {
+    if (isExporting) return;
     const element = getEspelhoElement();
     if (!element) {
       showToast('Espelho do orçamento não encontrado.');
@@ -151,17 +138,17 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
 
     try {
       setIsExporting(true);
-      showToast('Copiando imagem do espelho...');
       const copied = await copyEspelhoImageToClipboard(element);
       if (copied) {
-        showToast('✓ Imagem copiada! Pressione Ctrl+V no WhatsApp para enviar.');
+        setImageCopiedBadge(true);
+        window.setTimeout(() => setImageCopiedBadge(false), 2200);
+        showToast('✓ Imagem copiada! Cole no WhatsApp (Ctrl+V).');
       } else {
-        throw new Error('Clipboard API não suportada');
+        showToast('Não foi possível acessar a área de transferência.');
       }
     } catch (err) {
       console.error('Erro ao copiar imagem:', err);
-      await handleDownloadImage('png');
-      showToast('Cópia direta não suportada. A imagem foi baixada automaticamente!');
+      showToast('Não foi possível copiar a imagem diretamente.');
     } finally {
       setIsExporting(false);
     }
@@ -274,56 +261,38 @@ export const ModalVerOrcamentoFollowUp: React.FC<ModalVerOrcamentoFollowUpProps>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Baixar Imagem (PNG / JPG) */}
-          <div ref={imageMenuRef} className="relative inline-block">
-            <button
-              type="button"
-              onClick={() => setIsImageMenuOpen((prev) => !prev)}
-              disabled={isExporting}
-              className="h-9 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-              title="Baixar imagem em PNG ou JPG exatamente igual à pré-visualização"
-            >
-              <Download className="w-4 h-4 text-slate-600" />
-              <span>Baixar Imagem</span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-            </button>
-
-            {isImageMenuOpen && (
-              <div className="absolute right-0 mt-1.5 w-48 bg-white rounded-xl border border-slate-200 shadow-xl z-50 p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                <button
-                  type="button"
-                  onClick={() => handleDownloadImage('png')}
-                  className="w-full px-3 py-2 rounded-lg hover:bg-blue-50 text-left text-xs font-bold text-slate-800 flex items-center gap-2 cursor-pointer"
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-[#0052cc]" />
-                  <span>Baixar PNG (.png)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDownloadImage('jpg')}
-                  className="w-full px-3 py-2 rounded-lg hover:bg-blue-50 text-left text-xs font-bold text-slate-800 flex items-center gap-2 cursor-pointer"
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Baixar JPG (.jpg)</span>
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Baixar Imagem (download imediato com nome padrão) */}
+          <button
+            type="button"
+            onClick={handleDownloadImage}
+            disabled={isExporting}
+            className="h-9 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            title="Baixar imagem completa do orçamento imediatamente"
+          >
+            <Download className="w-4 h-4 text-slate-600" />
+            <span>Baixar Imagem</span>
+          </button>
 
           {/* Copiar Imagem */}
           <button
             type="button"
             onClick={handleCopyImage}
             disabled={isExporting}
-            className="h-9 px-3 rounded-xl border border-blue-200 bg-blue-50/80 hover:bg-blue-100 text-[#0052cc] font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            className={`h-9 px-3 rounded-xl border font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 ${
+              imageCopiedBadge
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-blue-200 bg-blue-50/80 hover:bg-blue-100 text-[#0052cc]'
+            }`}
             title="Copiar imagem para colar no WhatsApp (Ctrl+V)"
           >
             {isExporting ? (
               <Loader2 className="w-4 h-4 animate-spin text-[#0052cc]" />
+            ) : imageCopiedBadge ? (
+              <Check className="w-4 h-4 text-emerald-600" />
             ) : (
               <Copy className="w-4 h-4 text-[#0052cc]" />
             )}
-            <span>Copiar Imagem</span>
+            <span>{imageCopiedBadge ? 'Imagem copiada!' : 'Copiar Imagem'}</span>
           </button>
 
           {/* Salvar em PDF */}
