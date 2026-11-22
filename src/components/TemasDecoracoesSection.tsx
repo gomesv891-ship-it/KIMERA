@@ -5,18 +5,14 @@ import {
   Check,
   RotateCcw,
   Calendar,
-  Monitor,
-  FileText,
-  FileDown,
-  Sliders,
   X,
   Clock,
+  Search,
 } from 'lucide-react';
 import {
   ALL_THEME_IDS,
   CustomThemeConfig,
   FenixThemeId,
-  FenixThemeScope,
   FenixThemeState,
   activateTheme,
   deactivateTheme,
@@ -29,48 +25,10 @@ import {
   setPreviewTheme,
   THEME_UPDATED_EVENT,
 } from '../utils/themeService';
-import { EspelhoOrcamento, EspelhoItem } from './EspelhoOrcamento';
-import { FenixOfficialLogo } from './FenixOfficialLogo';
 
 interface TemasDecoracoesSectionProps {
   onShowToast?: (msg: string) => void;
 }
-
-const SAMPLE_BUDGET_ITEMS: EspelhoItem[] = [
-  {
-    id: 'sample_1',
-    qtd: '22,80',
-    descricao: 'Piso FLEXFLOOR PREMIUM 2mm (capa 0,20mm) [cx 5,70m²] - NOVA LINHA',
-    subtitulo: '4 CAIXAS',
-    unidade: 'm²',
-    precoUnitario: 59.9,
-    total: 1365.72,
-  },
-  {
-    id: 'sample_2',
-    qtd: '6',
-    descricao: 'Autonivelante FLEXFLOOR Secagem 12h - 20Kg',
-    unidade: 'saco(s)',
-    precoUnitario: 79.9,
-    total: 479.4,
-  },
-  {
-    id: 'sample_3',
-    qtd: '1',
-    descricao: 'Primer para Autonivelante Flexfloor (3,6L) Base e Sobreposição',
-    unidade: 'balde(s)',
-    precoUnitario: 79.9,
-    total: 79.9,
-  },
-  {
-    id: 'sample_4',
-    qtd: '2',
-    descricao: 'Cola para Piso Vinílico FlexFloor Super Tack (4KG)',
-    unidade: 'balde(s)',
-    precoUnitario: 99.9,
-    total: 199.8,
-  },
-];
 
 export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
   onShowToast,
@@ -82,8 +40,6 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
   const [customDraft, setCustomDraft] = useState<CustomThemeConfig>(
     () => getThemeState().customTheme
   );
-  const [showBudgetPreview, setShowBudgetPreview] = useState<boolean>(true);
-  const [inspectedBudgetTheme, setInspectedBudgetTheme] = useState<FenixThemeId | null>(null);
 
   useEffect(() => {
     const sync = () => {
@@ -114,9 +70,6 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
     [effectiveId, customDraft]
   );
 
-  const budgetInspectionId: FenixThemeId =
-    inspectedBudgetTheme || previewId || effectiveId;
-
   const notify = (msg: string) => {
     if (onShowToast) onShowToast(msg);
   };
@@ -128,22 +81,19 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
     const updated = activateTheme(id);
     setThemeState(updated);
     setPreviewIdState(null);
-    setInspectedBudgetTheme(id);
     const def = getThemeDefinition(id, customDraft);
-    notify(`Tema "${def.name}" ativado com sucesso!`);
+    notify(`Tema "${def.name}" ativado em todo o CRM!`);
   };
 
   const handlePreview = (id: FenixThemeId) => {
     if (previewId === id) {
       setPreviewTheme(null);
       setPreviewIdState(null);
-      setInspectedBudgetTheme(null);
       notify('Pré-visualização encerrada.');
       return;
     }
     setPreviewTheme(id, id === 'personalizado' ? customDraft : undefined);
     setPreviewIdState(id);
-    setInspectedBudgetTheme(id);
     const def = getThemeDefinition(id, customDraft);
     notify(`Pré-visualizando "${def.name}". Clique em "Ativar tema" para aplicar.`);
   };
@@ -152,29 +102,12 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
     const updated = deactivateTheme();
     setThemeState(updated);
     setPreviewIdState(null);
-    setInspectedBudgetTheme('padrao');
-    notify('Tema sazonal desativado. Modelo PREMIUM restaurado.');
+    notify('Tema personalizado desativado. Identidade PREMIUM restaurada.');
   };
 
   const handleUpdateOption = (patch: Partial<FenixThemeState>) => {
     const updated = saveThemeState(patch);
     setThemeState(updated);
-  };
-
-  const handleScopeChange = (scope: FenixThemeScope) => {
-    const updated = saveThemeState({
-      scope,
-      applyToSystem: scope === 'crm' || scope === 'ambos',
-      applyToBudgets: scope === 'orcamentos' || scope === 'ambos',
-    });
-    setThemeState(updated);
-    notify(
-      scope === 'crm'
-        ? 'Aplicação definida somente para o CRM.'
-        : scope === 'orcamentos'
-          ? 'Aplicação definida somente para os orçamentos.'
-          : 'Aplicação definida para o CRM e os orçamentos.'
-    );
   };
 
   const handleSaveCustomColors = (andActivate = false) => {
@@ -185,7 +118,6 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
     } else {
       setPreviewTheme('personalizado', { ...customDraft, motif: 'nenhum' });
       setPreviewIdState('personalizado');
-      setInspectedBudgetTheme('personalizado');
       notify('Cores personalizadas aplicadas na pré-visualização.');
     }
   };
@@ -193,7 +125,7 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* ======================================================== */}
-      {/* CABEÇALHO E STATUS DO TEMA ATUAL                         */}
+      {/* CABEÇALHO E STATUS DO TEMA ATUAL DO CRM                   */}
       {/* ======================================================== */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-7 shadow-xs space-y-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -203,10 +135,10 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900">
-                Temas e Decorações
+                Temas e Personalização
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 mt-0.5 max-w-2xl">
-                Todos os temas mantêm exatamente a estrutura oficial do modelo <strong>PREMIUM</strong>, substituindo exclusivamente as cores no CRM, orçamentos, impressão e PDFs, preservando integralmente a logo oficial da Fênix World.
+                Personalize a identidade visual global do CRM — menu lateral, cabeçalho, fundo das páginas, cards, botões, campos de pesquisa, tabelas, bordas e destaques — mantendo a logo da Fênix World e os modelos de orçamento independentes dentro de Orçamentos.
               </p>
             </div>
           </div>
@@ -252,7 +184,7 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-bold text-slate-900 flex items-center gap-2 flex-wrap">
                 <span>
-                  {previewId ? 'Pré-visualizando:' : 'Tema em vigor:'}{' '}
+                  {previewId ? 'Pré-visualizando:' : 'Tema ativo no CRM:'}{' '}
                   <strong>{effectiveDef.name}</strong>
                 </span>
                 {previewId && (
@@ -262,199 +194,91 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
                 )}
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                {scheduleStatus.statusLabel} • Estrutura PREMIUM fixa com adaptação exclusiva de cores e logo original protegida
+                {scheduleStatus.statusLabel} • Aplicado em todas as telas do CRM com logo original protegida e orçamentos independentes
               </p>
             </div>
           </div>
-
-          {/* Destino de Aplicação */}
-          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 self-start sm:self-auto">
-            {(
-              [
-                { id: 'crm', label: 'Somente no CRM' },
-                { id: 'orcamentos', label: 'Somente nos Orçamentos' },
-                { id: 'ambos', label: 'CRM e Orçamentos' },
-              ] as { id: FenixThemeScope; label: string }[]
-            ).map((opt) => {
-              const selected = themeState.scope === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => handleScopeChange(opt.id)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
-                    selected
-                      ? 'bg-[#1D4ED8] text-white shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
-        {/* ======================================================== */}
-        {/* CONTROLES DE APLICAÇÃO E AGENDAMENTO AUTOMÁTICO          */}
-        {/* ======================================================== */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {/* Bloco Esquerdo: Controles de Aplicação */}
-          <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white space-y-3.5">
+        {/* Agendamento Automático por Período */}
+        <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
-              <Sliders className="w-4 h-4 text-[#1D4ED8]" />
-              <span>Controles de Aplicação e PDFs</span>
+              <Calendar className="w-4 h-4 text-[#1D4ED8]" />
+              <span>Agendamento Automático por Período</span>
+            </div>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+              <input
+                type="checkbox"
+                checked={themeState.autoScheduleEnabled}
+                onChange={(e) => {
+                  handleUpdateOption({ autoScheduleEnabled: e.target.checked });
+                  notify(
+                    e.target.checked
+                      ? 'Ativação automática por período habilitada.'
+                      : 'Agendamento automático desativado.'
+                  );
+                }}
+                className="w-4 h-4 rounded text-[#1D4ED8] cursor-pointer"
+              />
+              <span>Ativar automaticamente</span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                Tema programado
+              </label>
+              <select
+                value={themeState.scheduledThemeId}
+                onChange={(e) =>
+                  handleUpdateOption({ scheduledThemeId: e.target.value as FenixThemeId })
+                }
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#1D4ED8] cursor-pointer"
+              >
+                {ALL_THEME_IDS.filter((id) => id !== 'padrao').map((id) => (
+                  <option key={id} value={id}>
+                    {getThemeDefinition(id, customDraft).name}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="divide-y divide-slate-100">
-              <label className="py-2.5 flex items-center justify-between gap-4 cursor-pointer">
-                <div className="flex items-center gap-2.5">
-                  <Monitor className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                  <div>
-                    <div className="text-xs font-bold text-slate-800">Aplicar paleta no sistema (CRM)</div>
-                    <div className="text-[11px] text-slate-500">Cabeçalho, menu lateral, botões, abas, cards e tabelas</div>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={themeState.applyToSystem}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    const nextScope: FenixThemeScope =
-                      checked && themeState.applyToBudgets
-                        ? 'ambos'
-                        : checked
-                          ? 'crm'
-                          : 'orcamentos';
-                    handleUpdateOption({ applyToSystem: checked, scope: nextScope });
-                  }}
-                  className="w-4 h-4 rounded text-[#1D4ED8] cursor-pointer"
-                />
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                Data de início
               </label>
+              <input
+                type="date"
+                value={themeState.startDate}
+                onChange={(e) => handleUpdateOption({ startDate: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 tabular-nums focus:outline-none focus:border-[#1D4ED8]"
+              />
+            </div>
 
-              <label className="py-2.5 flex items-center justify-between gap-4 cursor-pointer">
-                <div className="flex items-center gap-2.5">
-                  <FileText className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                  <div>
-                    <div className="text-xs font-bold text-slate-800">Aplicar paleta nos orçamentos</div>
-                    <div className="text-[11px] text-slate-500">Substitui exclusivamente as cores mantendo o layout PREMIUM exato</div>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={themeState.applyToBudgets}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    const nextScope: FenixThemeScope =
-                      themeState.applyToSystem && checked
-                        ? 'ambos'
-                        : checked
-                          ? 'orcamentos'
-                          : 'crm';
-                    handleUpdateOption({ applyToBudgets: checked, scope: nextScope });
-                  }}
-                  className="w-4 h-4 rounded text-[#1D4ED8] cursor-pointer"
-                />
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                Data de término
               </label>
-
-              <label className="py-2.5 flex items-center justify-between gap-4 cursor-pointer">
-                <div className="flex items-center gap-2.5">
-                  <FileDown className="w-4 h-4 text-slate-500 flex-shrink-0" />
-                  <div>
-                    <div className="text-xs font-bold text-slate-800">Aplicar paleta nos PDFs e Impressão</div>
-                    <div className="text-[11px] text-slate-500">Garante fidelidade cromática exata entre tela, imagem, impressão e PDF</div>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={themeState.applyToPdf}
-                  onChange={(e) => handleUpdateOption({ applyToPdf: e.target.checked })}
-                  className="w-4 h-4 rounded text-[#1D4ED8] cursor-pointer"
-                />
-              </label>
+              <input
+                type="date"
+                value={themeState.endDate}
+                onChange={(e) => handleUpdateOption({ endDate: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 tabular-nums focus:outline-none focus:border-[#1D4ED8]"
+              />
             </div>
           </div>
 
-          {/* Bloco Direito: Agendamento Automático */}
-          <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
-                <Calendar className="w-4 h-4 text-[#1D4ED8]" />
-                <span>Agendamento Automático por Período</span>
-              </div>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={themeState.autoScheduleEnabled}
-                  onChange={(e) => {
-                    handleUpdateOption({ autoScheduleEnabled: e.target.checked });
-                    notify(
-                      e.target.checked
-                        ? 'Ativação automática por período habilitada.'
-                        : 'Agendamento automático desativado.'
-                    );
-                  }}
-                  className="w-4 h-4 rounded text-[#1D4ED8] cursor-pointer"
-                />
-                <span>Ativar automaticamente</span>
-              </label>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Tema programado
-                </label>
-                <select
-                  value={themeState.scheduledThemeId}
-                  onChange={(e) =>
-                    handleUpdateOption({ scheduledThemeId: e.target.value as FenixThemeId })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#1D4ED8] cursor-pointer"
-                >
-                  {ALL_THEME_IDS.filter((id) => id !== 'padrao').map((id) => (
-                    <option key={id} value={id}>
-                      {getThemeDefinition(id, customDraft).name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Data de início
-                </label>
-                <input
-                  type="date"
-                  value={themeState.startDate}
-                  onChange={(e) => handleUpdateOption({ startDate: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 tabular-nums focus:outline-none focus:border-[#1D4ED8]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Data de término
-                </label>
-                <input
-                  type="date"
-                  value={themeState.endDate}
-                  onChange={(e) => handleUpdateOption({ endDate: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 tabular-nums focus:outline-none focus:border-[#1D4ED8]"
-                />
-              </div>
-            </div>
-
-            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80 flex items-center gap-2 text-[11px] text-slate-600">
-              <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-              <span>{scheduleStatus.statusLabel}</span>
-            </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80 flex items-center gap-2 text-[11px] text-slate-600">
+            <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+            <span>{scheduleStatus.statusLabel}</span>
           </div>
         </div>
       </div>
 
       {/* ======================================================== */}
-      {/* GRADE DOS 10 CARTÕES DE TEMAS OFICIAIS                   */}
+      {/* GRADE DOS 10 TEMAS DO CRM                                */}
       {/* ======================================================== */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {ALL_THEME_IDS.map((themeId) => {
@@ -476,117 +300,155 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
               }`}
             >
               <div className="space-y-3">
-                {/* Miniatura Ilustrativa fiel ao Modelo PREMIUM */}
+                {/* Miniatura Estrutural do CRM (Sidebar, Header, Fundo, Card, Pesquisa, Tabela, Botões) */}
                 <div
-                  className="rounded-xl border overflow-hidden h-36 flex bg-white"
+                  className="rounded-xl border overflow-hidden h-36 flex"
                   style={{
-                    borderColor: def.budget.outerBorder,
+                    borderColor: def.crm.cardBorder,
                     backgroundColor: def.crm.pageBg,
                   }}
                 >
-                  {/* Mini Sidebar */}
+                  {/* Mini Menu Lateral */}
                   <div
-                    className="w-12 p-1.5 flex flex-col justify-between flex-shrink-0"
-                    style={{ backgroundColor: def.crm.sidebarBg }}
+                    className="w-16 p-2 flex flex-col justify-between flex-shrink-0 border-r"
+                    style={{
+                      backgroundColor: def.crm.sidebarBg,
+                      borderRightColor: def.crm.sidebarBorder,
+                    }}
                   >
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1 pb-1.5 border-b" style={{ borderBottomColor: def.crm.sidebarBorder }}>
+                        <span
+                          className="w-2.5 h-2.5 rounded-xs flex-shrink-0"
+                          style={{ backgroundColor: def.crm.sidebarActiveAccent }}
+                        />
+                        <span
+                          className="h-1.5 w-8 rounded-xs"
+                          style={{ backgroundColor: def.crm.sidebarText, opacity: 0.85 }}
+                        />
+                      </div>
                       <div
-                        className="h-2 w-full rounded-sm"
-                        style={{ backgroundColor: def.crm.primary }}
+                        className="h-3.5 w-full rounded-md px-1 flex items-center"
+                        style={{
+                          backgroundColor: def.crm.sidebarActiveBg,
+                          boxShadow: `inset 0 0 0 1px ${def.crm.sidebarActiveAccent}55`,
+                        }}
+                      >
+                        <span
+                          className="h-1 w-7 rounded-xs"
+                          style={{ backgroundColor: def.crm.sidebarActiveText }}
+                        />
+                      </div>
+                      <div
+                        className="h-2.5 w-11 rounded-md"
+                        style={{ backgroundColor: def.crm.sidebarHoverBg }}
                       />
-                      <div className="h-1.5 w-4/5 rounded-sm bg-white/25" />
-                      <div className="h-1.5 w-3/4 rounded-sm bg-white/20" />
+                      <div
+                        className="h-2 w-9 rounded-xs"
+                        style={{ backgroundColor: def.crm.sidebarMuted, opacity: 0.45 }}
+                      />
                     </div>
                     <div
-                      className="h-1.5 w-full rounded-sm"
-                      style={{ backgroundColor: def.crm.accent }}
+                      className="h-1.5 w-full rounded-xs"
+                      style={{ backgroundColor: def.crm.sidebarMuted, opacity: 0.35 }}
                     />
                   </div>
 
-                  {/* Mini Folha de Orçamento PREMIUM */}
-                  <div className="flex-1 p-2 flex flex-col min-w-0">
+                  {/* Mini Cabeçalho + Área de Trabalho do CRM */}
+                  <div className="flex-1 flex flex-col min-w-0">
+                    {/* Mini Cabeçalho Principal */}
                     <div
-                      className="rounded-lg border bg-white overflow-hidden flex-1 flex flex-col justify-between shadow-2xs"
-                      style={{ borderColor: def.budget.outerBorder }}
+                      className="h-8 px-2.5 flex items-center justify-between gap-2 flex-shrink-0"
+                      style={{
+                        background: `linear-gradient(90deg, ${def.crm.headerOverlayFrom}, ${def.crm.headerOverlayVia}, ${def.crm.headerOverlayTo})`,
+                        borderBottom: `2px solid ${def.crm.headerAccent}`,
+                      }}
                     >
-                      {/* Mini Cabeçalho Curvo PREMIUM */}
+                      <span className="h-1.5 w-12 rounded-xs bg-white/90" />
                       <div
-                        className="relative h-7 flex items-center justify-between px-2 overflow-hidden"
+                        className="h-4 w-20 rounded-md border px-1.5 flex items-center gap-1"
                         style={{
-                          background: `linear-gradient(90deg, ${def.budget.headerLightBgStart} 0%, ${def.budget.headerLightBgEnd} 100%)`,
-                          borderBottom: `2px solid ${def.budget.headerBottomBarBg}`,
+                          backgroundColor: def.crm.headerSearchBg,
+                          borderColor: def.crm.headerSearchBorder,
                         }}
                       >
-                        <FenixOfficialLogo height={14} />
-                        <div
-                          className="px-2 py-0.5 rounded-l-full text-[7.5px] font-black tracking-wider uppercase whitespace-nowrap"
-                          style={{
-                            background: `linear-gradient(90deg, ${def.budget.headerWaveFrontStart} 0%, ${def.budget.headerWaveFrontEnd} 100%)`,
-                            color: def.budget.bannerTitleColor,
-                          }}
-                        >
-                          ORÇAMENTO
-                        </div>
+                        <Search className="w-2 h-2 text-white/70" />
+                        <span className="h-1 w-8 rounded-xs bg-white/40" />
                       </div>
+                    </div>
 
-                      {/* Mini Blocos + Tabela + Total */}
-                      <div className="px-2 py-1 space-y-1 flex-1 flex flex-col justify-between">
-                        <div className="grid grid-cols-2 gap-1">
-                          <div
-                            className="h-2 rounded-xs"
-                            style={{ backgroundColor: def.budget.sectionHeaderBg }}
-                          />
-                          <div
-                            className="h-2 rounded-xs"
-                            style={{ backgroundColor: def.budget.sectionHeaderBg }}
-                          />
-                        </div>
-                        <div
-                          className="h-2.5 w-full rounded-xs"
-                          style={{
-                            background: `linear-gradient(90deg, ${def.budget.tableHeaderFrom} 0%, ${def.budget.tableHeaderTo} 100%)`,
-                          }}
-                        />
+                    {/* Mini Cards, Campo de Pesquisa, Tabela & Botões */}
+                    <div className="flex-1 p-2 flex flex-col gap-1.5 min-h-0">
+                      {/* Card principal */}
+                      <div
+                        className="flex-1 rounded-lg border p-2 flex flex-col justify-between shadow-2xs"
+                        style={{
+                          backgroundColor: def.crm.cardBg,
+                          borderColor: def.crm.cardBorder,
+                        }}
+                      >
+                        {/* Topo do card: campo de pesquisa + chip de destaque + botão */}
                         <div className="flex items-center justify-between gap-1.5">
                           <div
-                            className="h-3 flex-1 rounded border bg-white"
-                            style={{ borderColor: def.budget.freightBorder }}
-                          />
-                          <div
-                            className="px-2 py-0.5 rounded text-[7.5px] font-black border whitespace-nowrap"
+                            className="h-4 flex-1 rounded-md border px-1.5 flex items-center gap-1"
                             style={{
-                              background: `linear-gradient(90deg, ${def.budget.totalBoxLeftStart} 0%, ${def.budget.totalBoxWaveStart} 100%)`,
-                              borderColor: def.budget.totalBoxBorder,
-                              color: def.budget.totalValueColor,
+                              backgroundColor: def.crm.inputBg,
+                              borderColor: def.crm.inputBorder,
                             }}
                           >
-                            TOTAL R$ 2.124
+                            <span
+                              className="h-1 w-10 rounded-xs"
+                              style={{ backgroundColor: def.crm.highlightText, opacity: 0.35 }}
+                            />
+                          </div>
+                          <span
+                            className="px-1.5 py-0.5 rounded-md text-[8px] font-bold whitespace-nowrap"
+                            style={{
+                              backgroundColor: def.crm.indicatorBg,
+                              color: def.crm.indicatorText,
+                            }}
+                          >
+                            Destaque
+                          </span>
+                          <span
+                            className="px-2 py-0.5 rounded-md text-[8px] font-bold text-white whitespace-nowrap"
+                            style={{ backgroundColor: def.crm.primary }}
+                          >
+                            Ação
+                          </span>
+                        </div>
+
+                        {/* Mini Tabela */}
+                        <div
+                          className="rounded-md border overflow-hidden"
+                          style={{ borderColor: def.crm.tableBorder }}
+                        >
+                          <div
+                            className="h-3.5 px-2 flex items-center justify-between text-[7.5px] font-bold uppercase tracking-wider"
+                            style={{
+                              backgroundColor: def.crm.tableHeaderBg,
+                              color: def.crm.tableHeaderText,
+                              borderBottom: `1px solid ${def.crm.dividerColor}`,
+                            }}
+                          >
+                            <span>Cliente</span>
+                            <span>Status</span>
+                          </div>
+                          <div
+                            className="h-3.5 px-2 flex items-center justify-between"
+                            style={{ backgroundColor: def.crm.cardBg }}
+                          >
+                            <span
+                              className="h-1.5 w-14 rounded-xs"
+                              style={{ backgroundColor: def.crm.highlightText, opacity: 0.7 }}
+                            />
+                            <span
+                              className="h-1.5 w-6 rounded-xs"
+                              style={{ backgroundColor: def.crm.secondary, opacity: 0.55 }}
+                            />
                           </div>
                         </div>
                       </div>
-
-                      {/* Mini Ondas Inferiores PREMIUM */}
-                      <svg
-                        className="w-full h-3 block flex-shrink-0"
-                        preserveAspectRatio="none"
-                        viewBox="0 0 200 16"
-                        fill="none"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M0 5 C 45 13, 100 14, 155 6 C 175 3, 190 2, 200 4 L 200 16 L 0 16 Z"
-                          fill={def.budget.waveBackStart}
-                          opacity="0.7"
-                        />
-                        <path
-                          d="M0 3 C 50 12, 110 15, 165 8 C 182 5, 192 5, 200 7 L 200 16 L 0 16 Z"
-                          fill={def.budget.waveMidStart}
-                        />
-                        <path
-                          d="M0 8 C 55 15, 125 16, 180 9 C 190 8, 195 8, 200 10 L 200 16 L 0 16 Z"
-                          fill={def.budget.waveFrontStart}
-                        />
-                      </svg>
                     </div>
                   </div>
                 </div>
@@ -660,7 +522,7 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
       </div>
 
       {/* ======================================================== */}
-      {/* EDITOR DO TEMA PERSONALIZADO (SOMENTE CORES / LAYOUT PREMIUM) */}
+      {/* EDITOR DO TEMA PERSONALIZADO (EXCLUSIVO DO CRM)          */}
       {/* ======================================================== */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -669,7 +531,7 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
               Editor do Tema Personalizado
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Selecione manualmente as cores mantendo exatamente a mesma estrutura oficial PREMIUM.
+              Defina manualmente as cores do CRM mantendo legibilidade, harmonia e estrutura originais.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -726,62 +588,6 @@ export const TemasDecoracoesSection: React.FC<TemasDecoracoesSectionProps> = ({
             </div>
           ))}
         </div>
-      </div>
-
-      {/* ======================================================== */}
-      {/* PRÉ-VISUALIZAÇÃO AO VIVO DO MODELO OFICIAL PREMIUM       */}
-      {/* ======================================================== */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-bold text-slate-900">
-              Pré-visualização do Orçamento — Tema {getThemeDefinition(budgetInspectionId, customDraft).name}
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              O modelo PREMIUM mantém estrutura, dimensões, logo original e ondas idênticas em todos os temas, alterando somente as cores.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={budgetInspectionId}
-              onChange={(e) => setInspectedBudgetTheme(e.target.value as FenixThemeId)}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 cursor-pointer"
-            >
-              {ALL_THEME_IDS.map((id) => (
-                <option key={id} value={id}>
-                  {getThemeDefinition(id, customDraft).name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setShowBudgetPreview((prev) => !prev)}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer whitespace-nowrap"
-            >
-              {showBudgetPreview ? 'Ocultar Prévia' : 'Mostrar Prévia'}
-            </button>
-          </div>
-        </div>
-
-        {showBudgetPreview && (
-          <div className="overflow-x-auto pb-2 pt-1">
-            <EspelhoOrcamento
-              id="espelho-preview-temas"
-              clientName="Testando"
-              clientType="Cliente Final"
-              clientContact="(12) 34544-4444"
-              consultoraName="Vanessa Gomes"
-              dataOrcamento="18/11/2026"
-              observacoes=""
-              items={SAMPLE_BUDGET_ITEMS}
-              freteValor={0}
-              freteEndereco=""
-              totalFinal={2124.82}
-              previewThemeId={budgetInspectionId}
-              previewCustomTheme={customDraft}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

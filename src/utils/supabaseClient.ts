@@ -461,6 +461,7 @@ export const SYNC_COLLECTIONS: { key: string; label: string; description: string
   { key: 'fenix_custos_tarkett_itens_v1', label: 'Itens Tarkett', description: 'Tabela de itens e acabamentos Tarkett' },
   { key: 'fenix_tarkett_produtos_catalogo', label: 'Catálogo Tarkett', description: 'Produtos do catálogo Tarkett' },
   { key: 'fenix_calculadora_rendimentos', label: 'Rendimentos da Calculadora', description: 'Base independente de rendimentos técnicos' },
+  { key: 'fenix_calculadora_plantas_v1', label: 'Calculadora de Plantas', description: 'Plantas importadas, ambientes e cálculos salvos' },
   { key: 'fenix_custos_variaveis_v1', label: 'Custos Variáveis', description: 'Configuração de custos variáveis' },
   { key: 'fenix_whatsapp_templates_by_category', label: 'Modelos WhatsApp', description: 'Modelos de mensagens do WhatsApp por categoria' },
   { key: 'fenix_metas_config_data', label: 'Configurações de Metas', description: 'Parâmetros e metas mensais' },

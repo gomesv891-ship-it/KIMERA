@@ -239,15 +239,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={`w-full flex items-center gap-3 px-3.5 py-1.5 rounded-xl text-[13px] font-medium transition-all cursor-pointer select-none ${
                         isActive
                           ? 'bg-[#0052cc] text-white font-semibold shadow-sm shadow-blue-600/30'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                          : isThemed
+                            ? 'hover:bg-[var(--fenix-sidebar-hover)]'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                       }`}
                       style={
                         isThemed
                           ? isActive
                             ? {
-                                backgroundColor: theme.crm.primary,
-                                color: '#ffffff',
-                                borderLeft: `3px solid ${theme.crm.accent}`,
+                                backgroundColor: theme.crm.sidebarActiveBg,
+                                color: theme.crm.sidebarActiveText,
+                                boxShadow: `inset 0 0 0 1px ${theme.crm.sidebarActiveAccent}55`,
                               }
                             : {
                                 color: theme.crm.sidebarText,
@@ -259,6 +261,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         className={`w-4 h-4 flex-shrink-0 ${
                           isActive ? 'text-white stroke-[2.2]' : 'text-slate-400 stroke-[1.8]'
                         }`}
+                        style={
+                          isThemed
+                            ? {
+                                color: isActive
+                                  ? theme.crm.sidebarActiveText
+                                  : theme.crm.sidebarMuted,
+                              }
+                            : undefined
+                        }
                       />
                       <span className="truncate">{item.label}</span>
                     </button>
@@ -320,7 +331,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <LogOut className="w-4 h-4" />
             <span>Sair do sistema</span>
           </button>
-          <p className="text-[10px] text-slate-400 text-center mt-1 font-normal tracking-tight">
+          <p
+            className="text-[10px] text-slate-400 text-center mt-1 font-normal tracking-tight"
+            style={isThemed ? { color: theme.crm.sidebarMuted } : undefined}
+          >
             Trabalhando juntos por grandes conquistas
           </p>
         </div>

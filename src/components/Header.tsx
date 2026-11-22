@@ -78,7 +78,6 @@ import { ProfileModal } from './ProfileModal';
 import { getDailyBibleVerse, BibleVerse } from '../data/dailyBibleVerses';
 import { getLocalCollectionSafe } from '../utils/supabaseClient';
 import { useFenixTheme } from '../utils/themeService';
-import { CrmHeaderDecoration } from './ThemeDecorations';
 
 interface HeaderProps {
   onOpenMobileMenu: () => void;
@@ -192,7 +191,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectSearchResult,
   onLogout,
 }) => {
-  const { theme, isThemed, showDecorations } = useFenixTheme('crm');
+  const { theme, isThemed } = useFenixTheme('crm');
   const [authVersion, setAuthVersion] = useState(0);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -1025,11 +1024,6 @@ export const Header: React.FC<HeaderProps> = ({
         }
       />
 
-      {/* Decoração discreta no cabeçalho conforme tema */}
-      {isThemed && showDecorations && (
-        <CrmHeaderDecoration motif={theme.motif} accentColor={theme.crm.headerAccent} />
-      )}
-
       {/* Content Container */}
       <div className="relative z-10 w-full px-4 sm:px-6 lg:px-8 xl:px-12 2xl:px-14 flex flex-col justify-between py-3 sm:py-3.5 gap-2.5">
         {/* Top Row: Greeting & Action Icons */}
@@ -1050,18 +1044,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <h1 className="text-lg sm:text-2xl lg:text-[25px] font-bold text-white tracking-tight leading-tight drop-shadow-xs truncate">
                   Olá, {firstName}!
                 </h1>
-                {isThemed && showDecorations && theme.badgeText && (
-                  <span
-                    className="px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border whitespace-nowrap"
-                    style={{
-                      backgroundColor: 'rgba(0,0,0,0.45)',
-                      borderColor: theme.crm.headerAccent,
-                      color: theme.crm.headerAccent,
-                    }}
-                  >
-                    {theme.badgeText}
-                  </span>
-                )}
               </div>
               <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm text-slate-300 font-normal mt-0.5">
                 <span className="hidden sm:inline">Que bom ter você aqui novamente.</span>
@@ -1090,7 +1072,17 @@ export const Header: React.FC<HeaderProps> = ({
               <Bell className="w-4 h-4 stroke-[2]" />
               {/* Mostrar contador de notificações não lidas quando existir */}
               {totalUnreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#0052cc] text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-[#091122] shadow-sm animate-in zoom-in duration-150">
+                <span
+                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#0052cc] text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-[#091122] shadow-sm animate-in zoom-in duration-150"
+                  style={
+                    isThemed
+                      ? {
+                          backgroundColor: theme.crm.primary,
+                          borderColor: theme.crm.sidebarBg,
+                        }
+                      : undefined
+                  }
+                >
                   {totalUnreadCount}
                 </span>
               )}
@@ -1428,7 +1420,15 @@ export const Header: React.FC<HeaderProps> = ({
                   if (e.key === 'Escape') setIsSearchOpen(false);
                 }}
                 placeholder="Buscar no sistema..."
-                className="w-full h-10 pl-10 pr-8 bg-black/40 hover:bg-black/50 focus:bg-black/60 backdrop-blur-md border border-white/20 focus:border-[#0052cc] rounded-2xl text-xs sm:text-sm text-white placeholder:text-slate-300 outline-none transition-all shadow-sm"
+                className="w-full h-10 pl-10 pr-8 bg-black/40 hover:bg-black/50 focus:bg-black/60 backdrop-blur-md border border-white/20 focus:border-[var(--fenix-header-search-focus,#0052cc)] rounded-2xl text-xs sm:text-sm text-white placeholder:text-slate-300 outline-none transition-all shadow-sm"
+                style={
+                  isThemed
+                    ? {
+                        backgroundColor: theme.crm.headerSearchBg,
+                        borderColor: theme.crm.headerSearchBorder,
+                      }
+                    : undefined
+                }
               />
               {searchQuery && (
                 <button

@@ -260,60 +260,204 @@
 }
 
 /* ==========================================================================
-   CENTRAL DE TEMAS E DECORAÇÕES — CRM FÊNIX WORLD
-   Aplicado somente quando um tema diferente do Padrão está ativo no CRM.
-   REGRA ABSOLUTA: Nunca alterar logos Fênix World nem .no-theme-override
+   CENTRAL DE TEMAS E PERSONALIZAÇÃO — CRM FÊNIX WORLD
+   Aplicado exclusivamente ao CRM quando um tema diferente do PREMIUM está ativo.
+   REGRA ABSOLUTA: Nunca alterar orçamentos (#espelho-oficial-orcamento),
+   folhas promocionais, logos Fênix World nem .no-theme-override.
    ========================================================================== */
 html[data-fenix-crm-theme="active"] body {
   background-color: var(--fenix-page-bg, #f1f5f9);
 }
 
-html[data-fenix-crm-theme="active"] .bg-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):not(.no-theme-override),
-html[data-fenix-crm-theme="active"] .bg-\[\#1D4ED8\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):not(.no-theme-override),
-html[data-fenix-crm-theme="active"] .bg-\[\#0057ff\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):not(.no-theme-override) {
-  background-color: var(--fenix-primary) !important;
+/* 1. Fundo das páginas e superfícies sutis dentro do conteúdo principal */
+html[data-fenix-crm-theme="active"] main .bg-slate-50:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] main .bg-slate-50\/80:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] main .bg-slate-50\/70:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] main .bg-slate-50\/60:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] main .bg-\[\#f8fafc\]:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] main .bg-\[\#f1f5f9\]:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
+  background-color: var(--fenix-panel-subtle-bg) !important;
 }
 
-html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0047b3\]:hover,
-html[data-fenix-crm-theme="active"] .hover\:bg-\[\#1e40af\]:hover,
-html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0043cc\]:hover,
-html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0052cc\]:hover {
-  background-color: var(--fenix-primary-hover) !important;
+/* 2. Cards, painéis brancos e blocos destacados */
+html[data-fenix-crm-theme="active"] main .bg-white:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
+  background-color: var(--fenix-card-bg);
 }
 
-html[data-fenix-crm-theme="active"] .bg-\[\#003865\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *),
-html[data-fenix-crm-theme="active"] .bg-\[\#0B2046\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
-  background-color: var(--fenix-secondary) !important;
+html[data-fenix-crm-theme="active"] .border-slate-200:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-slate-200\/90:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-slate-200\/80:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-slate-200\/70:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-slate-100:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
+  border-color: var(--fenix-card-border) !important;
 }
 
-html[data-fenix-crm-theme="active"] .text-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *),
-html[data-fenix-crm-theme="active"] .text-\[\#1D4ED8\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *),
-html[data-fenix-crm-theme="active"] .text-\[\#0057ff\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
-  color: var(--fenix-primary) !important;
-}
-
-html[data-fenix-crm-theme="active"] .border-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *),
-html[data-fenix-crm-theme="active"] .border-\[\#1D4ED8\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
-  border-color: var(--fenix-primary) !important;
-}
-
-html[data-fenix-crm-theme="active"] .bg-blue-50:not(#espelho-oficial-orcamento *):not(.no-theme-override),
-html[data-fenix-crm-theme="active"] .bg-blue-50\/80:not(#espelho-oficial-orcamento *):not(.no-theme-override) {
+html[data-fenix-crm-theme="active"] .bg-blue-50:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-50\/80:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-50\/60:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-50\/50:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-50\/40:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-50\/30:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-50\/25:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-100:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-100\/70:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-sky-50:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-sky-50\/60:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-indigo-50:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#eff6ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#f4f8ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#e0f2fe\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
   background-color: var(--fenix-card-tint-bg) !important;
 }
 
-html[data-fenix-crm-theme="active"] .border-blue-200:not(#espelho-oficial-orcamento *):not(.no-theme-override),
-html[data-fenix-crm-theme="active"] .border-blue-100:not(#espelho-oficial-orcamento *):not(.no-theme-override) {
+html[data-fenix-crm-theme="active"] .from-blue-50\/95:not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not(.no-theme-override *) {
+  --tw-gradient-from: var(--fenix-card-tint-bg) !important;
+  --tw-gradient-via: var(--fenix-panel-subtle-bg) !important;
+}
+
+html[data-fenix-crm-theme="active"] .border-blue-200:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-blue-200\/90:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-blue-100:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-blue-300:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-sky-100:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-sky-200:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-indigo-200:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-\[\#dce8fa\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
   border-color: var(--fenix-card-tint-border) !important;
 }
 
-html[data-fenix-crm-theme="active"] table:not(#espelho-oficial-orcamento table):not(.no-theme-override table) thead tr {
+/* 3. Bordas e divisórias */
+html[data-fenix-crm-theme="active"] .divide-slate-100:not(#espelho-oficial-orcamento *):not(.no-theme-override *) > :not(:last-child),
+html[data-fenix-crm-theme="active"] .divide-slate-200:not(#espelho-oficial-orcamento *):not(.no-theme-override *) > :not(:last-child) {
+  border-color: var(--fenix-divider-color) !important;
+}
+
+/* 4. Botões primários, secundários e estados hover */
+html[data-fenix-crm-theme="active"] .bg-\[\#0052cc\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0052CC\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#1D4ED8\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0057ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0066ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#2563EB\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-600:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-blue-700:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
+  background-color: var(--fenix-primary) !important;
+}
+
+html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0047b3\]:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-\[\#1e40af\]:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0043cc\]:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0052cc\]:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-blue-600:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-blue-700:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover {
+  background-color: var(--fenix-primary-hover) !important;
+}
+
+html[data-fenix-crm-theme="active"] .bg-\[\#003865\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0B2046\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#071a52\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#072B54\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0B3F7D\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0b1c3d\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .bg-\[\#0c1e3c\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] main button.bg-\[\#091122\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
+  background-color: var(--fenix-secondary) !important;
+}
+
+html[data-fenix-crm-theme="active"] main button.bg-\[\#091122\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-\[\#0B2046\]:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-\[\#071a52\]:not(.no-theme-override *):not(#espelho-oficial-orcamento *):hover {
+  background-color: var(--fenix-secondary-hover) !important;
+}
+
+html[data-fenix-crm-theme="active"] .hover\:bg-blue-50:not(aside *):not(#espelho-oficial-orcamento *):not(.no-theme-override *):hover,
+html[data-fenix-crm-theme="active"] .hover\:bg-blue-100:not(aside *):not(#espelho-oficial-orcamento *):not(.no-theme-override *):hover,
+html[data-fenix-crm-theme="active"] .group:hover .group-hover\:bg-blue-50:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
+  background-color: var(--fenix-card-tint-bg) !important;
+}
+
+/* 5. Campos de pesquisa, selects e inputs do CRM */
+html[data-fenix-crm-theme="active"] main input.bg-slate-50:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(#espelho-oficial-orcamento *):not(.no-theme-override *),
+html[data-fenix-crm-theme="active"] main select.bg-slate-50:not(#espelho-oficial-orcamento *):not(.no-theme-override *),
+html[data-fenix-crm-theme="active"] main textarea.bg-slate-50:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
+  background-color: var(--fenix-input-bg) !important;
+  border-color: var(--fenix-input-border) !important;
+}
+
+html[data-fenix-crm-theme="active"] main input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus,
+html[data-fenix-crm-theme="active"] main select:not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus,
+html[data-fenix-crm-theme="active"] main textarea:not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus {
+  border-color: var(--fenix-input-focus-border) !important;
+  box-shadow: 0 0 0 3px var(--fenix-input-focus-ring) !important;
+}
+
+html[data-fenix-crm-theme="active"] .focus\:border-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus,
+html[data-fenix-crm-theme="active"] .focus\:border-\[\#0057ff\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus,
+html[data-fenix-crm-theme="active"] .focus\:border-\[\#1D4ED8\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus,
+html[data-fenix-crm-theme="active"] .focus\:border-blue-500:not(#espelho-oficial-orcamento *):not(.no-theme-override *):focus {
+  border-color: var(--fenix-input-focus-border) !important;
+}
+
+html[data-fenix-crm-theme="active"] main input[type="checkbox"]:not(#espelho-oficial-orcamento *):not(.no-theme-override *),
+html[data-fenix-crm-theme="active"] main input[type="radio"]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
+  accent-color: var(--fenix-primary);
+}
+
+/* 6. Tabelas */
+html[data-fenix-crm-theme="active"] table:not(#espelho-oficial-orcamento table):not([data-fenix-budget-theme] table):not(.no-theme-override table) thead tr {
   background-color: var(--fenix-table-header-bg) !important;
   color: var(--fenix-table-header-text) !important;
 }
 
-html[data-fenix-crm-theme="active"] table:not(#espelho-oficial-orcamento table):not(.no-theme-override table) thead th {
+html[data-fenix-crm-theme="active"] table:not(#espelho-oficial-orcamento table):not([data-fenix-budget-theme] table):not(.no-theme-override table) thead th {
   color: var(--fenix-table-header-text) !important;
+  border-color: var(--fenix-table-border) !important;
+}
+
+html[data-fenix-crm-theme="active"] table:not(#espelho-oficial-orcamento table):not([data-fenix-budget-theme] table):not(.no-theme-override table) tbody tr {
+  border-color: var(--fenix-table-border) !important;
+}
+
+html[data-fenix-crm-theme="active"] table:not(#espelho-oficial-orcamento table):not([data-fenix-budget-theme] table):not(.no-theme-override table) tbody tr:hover {
+  background-color: var(--fenix-table-row-hover) !important;
+}
+
+/* 7. Elementos de destaque e tipografia enfatizada */
+html[data-fenix-crm-theme="active"] .text-\[\#0052cc\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#0052CC\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#1D4ED8\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#1d4ed8\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#0057ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#0066ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#2563EB\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-blue-600:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-blue-700:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-indigo-600:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#003865\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#0B3F7D\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .hover\:text-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *):hover,
+html[data-fenix-crm-theme="active"] .group:hover .group-hover\:text-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
+  color: var(--fenix-primary) !important;
+}
+
+html[data-fenix-crm-theme="active"] .text-\[\#071a52\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#091122\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#0B2046\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#072B54\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .text-\[\#0c1e3c\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not([id^="promocao-folha"] *):not(.no-theme-override *):not(.no-theme-override) {
+  color: var(--fenix-highlight-text) !important;
+}
+
+html[data-fenix-crm-theme="active"] .fill-\[\#0052cc\]:not(#espelho-oficial-orcamento *):not(.no-theme-override *) {
+  fill: var(--fenix-primary) !important;
+}
+
+html[data-fenix-crm-theme="active"] .border-\[\#0052cc\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-\[\#1D4ED8\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-\[\#0057ff\]:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-blue-500:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not(.no-theme-override *):not(.no-theme-override),
+html[data-fenix-crm-theme="active"] .border-blue-600:not(aside *):not(#espelho-oficial-orcamento *):not([data-fenix-budget-theme] *):not(.no-theme-override *):not(.no-theme-override) {
+  border-color: var(--fenix-primary) !important;
 }
 
 /* Proteção absoluta à Logo Oficial Fênix World em qualquer tema */

@@ -84,6 +84,7 @@ export interface FenixThemeDefinition {
     primary: string;
     primaryHover: string;
     secondary: string;
+    secondaryHover: string;
     accent: string;
     sidebarBg: string;
     sidebarFooterBg: string;
@@ -91,16 +92,33 @@ export interface FenixThemeDefinition {
     sidebarText: string;
     sidebarMuted: string;
     sidebarHoverBg: string;
+    sidebarActiveBg: string;
+    sidebarActiveText: string;
+    sidebarActiveAccent: string;
     logoLightBackdrop: boolean;
     headerOverlayFrom: string;
     headerOverlayVia: string;
     headerOverlayTo: string;
     headerAccent: string;
+    headerSearchBg: string;
+    headerSearchBorder: string;
+    headerSearchFocusBorder: string;
     pageBg: string;
+    cardBg: string;
+    cardBorder: string;
     cardTintBg: string;
     cardTintBorder: string;
+    panelSubtleBg: string;
+    dividerColor: string;
+    inputBg: string;
+    inputBorder: string;
+    inputFocusBorder: string;
+    inputFocusRing: string;
     tableHeaderBg: string;
     tableHeaderText: string;
+    tableRowHoverBg: string;
+    tableBorder: string;
+    highlightText: string;
     indicatorBg: string;
     indicatorText: string;
   };
@@ -226,10 +244,10 @@ export const DEFAULT_CUSTOM_THEME: CustomThemeConfig = {
 
 export const DEFAULT_THEME_STATE: FenixThemeState = {
   activeThemeId: 'padrao',
-  scope: 'ambos',
+  scope: 'crm',
   applyToSystem: true,
-  applyToBudgets: true,
-  applyToPdf: true,
+  applyToBudgets: false,
+  applyToPdf: false,
   showDecorationsInSystem: false,
   showDecorationsInBudgets: false,
   showDecorationsInPdf: false,
@@ -276,6 +294,16 @@ function isLightColor(hex: string): boolean {
   return luminance > 0.62;
 }
 
+function mixHexWithWhite(hex: string, whiteRatio: number): string {
+  const cleaned = (hex || '').replace('#', '').trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) return '#f8fafc';
+  const num = parseInt(cleaned, 16);
+  const r = Math.round(((num >> 16) & 0xff) * (1 - whiteRatio) + 255 * whiteRatio);
+  const g = Math.round(((num >> 8) & 0xff) * (1 - whiteRatio) + 255 * whiteRatio);
+  const b = Math.round((num & 0xff) * (1 - whiteRatio) + 255 * whiteRatio);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
 export const STATIC_THEME_DEFINITIONS: Record<
   Exclude<FenixThemeId, 'personalizado'>,
   FenixThemeDefinition
@@ -285,13 +313,14 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'PREMIUM',
     shortTag: 'Modelo Oficial',
     description:
-      'Modelo oficial e referência visual da Fênix World: azul-marinho, azul corporativo, azul-claro, branco e cinza.',
+      'Identidade oficial Fênix World: azul-marinho executivo, azul corporativo, superfícies brancas limpas e cinza neutro.',
     motif: 'padrao',
-    paletteSwatches: ['#00244d', '#00529e', '#1482e0', '#ffffff'],
+    paletteSwatches: ['#091122', '#0052cc', '#1482e0', '#f1f5f9'],
     crm: {
       primary: '#0052cc',
-      primaryHover: '#0047b3',
-      secondary: '#003865',
+      primaryHover: '#0044ad',
+      secondary: '#091122',
+      secondaryHover: '#14203b',
       accent: '#1482e0',
       sidebarBg: '#091122',
       sidebarFooterBg: '#070e1c',
@@ -299,16 +328,33 @@ export const STATIC_THEME_DEFINITIONS: Record<
       sidebarText: '#cbd5e1',
       sidebarMuted: '#94a3b8',
       sidebarHoverBg: 'rgba(255, 255, 255, 0.06)',
+      sidebarActiveBg: '#0052cc',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#38bdf8',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(0, 0, 0, 0.78)',
-      headerOverlayVia: 'rgba(0, 0, 0, 0.58)',
-      headerOverlayTo: 'rgba(0, 0, 0, 0.72)',
+      headerOverlayFrom: 'rgba(9, 17, 34, 0.82)',
+      headerOverlayVia: 'rgba(15, 29, 58, 0.64)',
+      headerOverlayTo: 'rgba(9, 17, 34, 0.78)',
       headerAccent: '#1482e0',
+      headerSearchBg: 'rgba(0, 0, 0, 0.40)',
+      headerSearchBorder: 'rgba(255, 255, 255, 0.20)',
+      headerSearchFocusBorder: '#38bdf8',
       pageBg: '#f1f5f9',
+      cardBg: '#ffffff',
+      cardBorder: '#e2e8f0',
       cardTintBg: '#eff6ff',
       cardTintBorder: '#bfdbfe',
+      panelSubtleBg: '#f8fafc',
+      dividerColor: '#e2e8f0',
+      inputBg: '#f8fafc',
+      inputBorder: '#cbd5e1',
+      inputFocusBorder: '#0052cc',
+      inputFocusRing: 'rgba(0, 82, 204, 0.14)',
       tableHeaderBg: '#f8fafc',
       tableHeaderText: '#334155',
+      tableRowHoverBg: '#f8fafc',
+      tableBorder: '#e2e8f0',
+      highlightText: '#091122',
       indicatorBg: '#dbeafe',
       indicatorText: '#1d4ed8',
     },
@@ -418,33 +464,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Natal',
     shortTag: 'Sazonal',
     description:
-      'Paleta natalina sobre o modelo PREMIUM: vermelho natalino, vermelho escuro, dourado, branco e toque discreto de verde.',
+      'Conceito premium natalino: borgonha veludo refinado, dourado champagne discreto, marfim limpo e alta legibilidade.',
     motif: 'natal',
     badgeText: 'Natal',
-    paletteSwatches: ['#b91c1c', '#6b0f14', '#d4af37', '#166534'],
+    paletteSwatches: ['#2f0c11', '#9f1d2c', '#c8a24b', '#fbf9f7'],
     crm: {
-      primary: '#b91c1c',
-      primaryHover: '#991b1b',
-      secondary: '#6b0f14',
-      accent: '#d4af37',
-      sidebarBg: '#2b080a',
-      sidebarFooterBg: '#1c0406',
-      sidebarBorder: '#5c1418',
-      sidebarText: '#fef2f2',
-      sidebarMuted: '#fca5a5',
-      sidebarHoverBg: 'rgba(212, 175, 55, 0.14)',
+      primary: '#9f1d2c',
+      primaryHover: '#821623',
+      secondary: '#3a1218',
+      secondaryHover: '#280b0f',
+      accent: '#c8a24b',
+      sidebarBg: '#2f0c11',
+      sidebarFooterBg: '#22070b',
+      sidebarBorder: '#4f1b22',
+      sidebarText: '#f7ecee',
+      sidebarMuted: '#d4aeb4',
+      sidebarHoverBg: 'rgba(200, 162, 75, 0.12)',
+      sidebarActiveBg: '#9f1d2c',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#e2c16b',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(76, 7, 10, 0.90)',
-      headerOverlayVia: 'rgba(136, 19, 19, 0.78)',
-      headerOverlayTo: 'rgba(76, 7, 10, 0.90)',
-      headerAccent: '#f5d061',
-      pageBg: '#fcf9f7',
-      cardTintBg: '#fef2f2',
-      cardTintBorder: '#fecaca',
-      tableHeaderBg: '#fef2f2',
-      tableHeaderText: '#7f1d1d',
-      indicatorBg: '#fef3c7',
-      indicatorText: '#991b1b',
+      headerOverlayFrom: 'rgba(42, 10, 15, 0.88)',
+      headerOverlayVia: 'rgba(78, 18, 27, 0.74)',
+      headerOverlayTo: 'rgba(42, 10, 15, 0.86)',
+      headerAccent: '#d4af37',
+      headerSearchBg: 'rgba(28, 7, 10, 0.48)',
+      headerSearchBorder: 'rgba(212, 175, 55, 0.34)',
+      headerSearchFocusBorder: '#e2c16b',
+      pageBg: '#fbf9f7',
+      cardBg: '#ffffff',
+      cardBorder: '#ebe2df',
+      cardTintBg: '#fdf4f4',
+      cardTintBorder: '#ecd2d5',
+      panelSubtleBg: '#faf5f4',
+      dividerColor: '#efe6e4',
+      inputBg: '#fcfaf9',
+      inputBorder: '#dfd3d0',
+      inputFocusBorder: '#9f1d2c',
+      inputFocusRing: 'rgba(159, 29, 44, 0.14)',
+      tableHeaderBg: '#f8f2f2',
+      tableHeaderText: '#661721',
+      tableRowHoverBg: '#fcf8f8',
+      tableBorder: '#ede3e0',
+      highlightText: '#4a1017',
+      indicatorBg: '#f9ecef',
+      indicatorText: '#8a1725',
     },
     budget: {
       outerBorder: '#e2c4b4',
@@ -552,33 +616,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Novembro Black',
     shortTag: 'Campanha',
     description:
-      'Preto, dourado metálico, branco e cinza escuro aplicados exatamente sobre o modelo PREMIUM.',
+      'Grafite executivo, dourado champagne escovado e superfícies claras em pedra neutra com contraste limpo.',
     motif: 'novembro_black',
     badgeText: 'NOVEMBRO BLACK',
-    paletteSwatches: ['#09090b', '#d4af37', '#27272a', '#ffffff'],
+    paletteSwatches: ['#18181b', '#9c761c', '#d4af37', '#f6f5f2'],
     crm: {
-      primary: '#111113',
-      primaryHover: '#27272a',
-      secondary: '#b48a1e',
-      accent: '#d4af37',
-      sidebarBg: '#09090b',
-      sidebarFooterBg: '#050507',
-      sidebarBorder: '#2b2412',
+      primary: '#232429',
+      primaryHover: '#35373f',
+      secondary: '#8c6916',
+      secondaryHover: '#705310',
+      accent: '#c89d28',
+      sidebarBg: '#161619',
+      sidebarFooterBg: '#0f0f12',
+      sidebarBorder: '#2d2d33',
       sidebarText: '#f4f4f5',
-      sidebarMuted: '#d4af37',
-      sidebarHoverBg: 'rgba(212, 175, 55, 0.12)',
+      sidebarMuted: '#c5b17a',
+      sidebarHoverBg: 'rgba(200, 157, 40, 0.12)',
+      sidebarActiveBg: '#2b2922',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#e2bf58',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(7, 7, 9, 0.92)',
-      headerOverlayVia: 'rgba(18, 15, 8, 0.85)',
-      headerOverlayTo: 'rgba(7, 7, 9, 0.92)',
-      headerAccent: '#e5bd53',
-      pageBg: '#f4f3ef',
-      cardTintBg: '#fdfaf0',
-      cardTintBorder: '#e8d290',
-      tableHeaderBg: '#141416',
-      tableHeaderText: '#f5d061',
-      indicatorBg: '#18181b',
-      indicatorText: '#f5d061',
+      headerOverlayFrom: 'rgba(18, 18, 21, 0.88)',
+      headerOverlayVia: 'rgba(38, 34, 24, 0.75)',
+      headerOverlayTo: 'rgba(18, 18, 21, 0.88)',
+      headerAccent: '#d4af37',
+      headerSearchBg: 'rgba(12, 12, 14, 0.50)',
+      headerSearchBorder: 'rgba(212, 175, 55, 0.34)',
+      headerSearchFocusBorder: '#e2bf58',
+      pageBg: '#f6f5f2',
+      cardBg: '#ffffff',
+      cardBorder: '#e5e1d8',
+      cardTintBg: '#faf7ed',
+      cardTintBorder: '#e4d5aa',
+      panelSubtleBg: '#f7f5ef',
+      dividerColor: '#ebe7de',
+      inputBg: '#faf9f6',
+      inputBorder: '#dcd7cb',
+      inputFocusBorder: '#9c761c',
+      inputFocusRing: 'rgba(156, 118, 28, 0.15)',
+      tableHeaderBg: '#f4f1e8',
+      tableHeaderText: '#3a3016',
+      tableRowHoverBg: '#faf8f2',
+      tableBorder: '#eae5da',
+      highlightText: '#18181b',
+      indicatorBg: '#f4edd5',
+      indicatorText: '#785a10',
     },
     budget: {
       outerBorder: '#d6c184',
@@ -686,33 +768,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Ano Novo',
     shortTag: 'Celebração',
     description:
-      'Azul-marinho, dourado, prata e branco aplicados exclusivamente nas cores do modelo PREMIUM.',
+      'Azul safira meia-noite, prata perolado e detalhes champagne em um painel claro, moderno e sofisticado.',
     motif: 'ano_novo',
     badgeText: 'Ano Novo',
-    paletteSwatches: ['#091e42', '#d4af37', '#cbd5e1', '#ffffff'],
+    paletteSwatches: ['#0b1d3a', '#163e7a', '#cfa744', '#f5f7fb'],
     crm: {
-      primary: '#0d2b5c',
-      primaryHover: '#081d40',
-      secondary: '#b89128',
-      accent: '#d4af37',
-      sidebarBg: '#071630',
-      sidebarFooterBg: '#040e20',
-      sidebarBorder: '#1e3a6b',
-      sidebarText: '#e2e8f0',
-      sidebarMuted: '#cbd5e1',
-      sidebarHoverBg: 'rgba(212, 175, 55, 0.14)',
+      primary: '#163e7a',
+      primaryHover: '#0f2e5c',
+      secondary: '#0b1d3a',
+      secondaryHover: '#162d54',
+      accent: '#c8a24b',
+      sidebarBg: '#0b1d3a',
+      sidebarFooterBg: '#07142b',
+      sidebarBorder: '#1f3963',
+      sidebarText: '#eef2f9',
+      sidebarMuted: '#b5c5de',
+      sidebarHoverBg: 'rgba(200, 162, 75, 0.12)',
+      sidebarActiveBg: '#163e7a',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#e2c16b',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(7, 22, 48, 0.90)',
-      headerOverlayVia: 'rgba(13, 43, 92, 0.78)',
-      headerOverlayTo: 'rgba(7, 22, 48, 0.90)',
-      headerAccent: '#f5d061',
-      pageBg: '#f3f5f9',
-      cardTintBg: '#f8fafc',
-      cardTintBorder: '#cbd5e1',
-      tableHeaderBg: '#eef2f8',
-      tableHeaderText: '#091e42',
-      indicatorBg: '#fef3c7',
-      indicatorText: '#926c0c',
+      headerOverlayFrom: 'rgba(11, 29, 58, 0.88)',
+      headerOverlayVia: 'rgba(22, 54, 104, 0.74)',
+      headerOverlayTo: 'rgba(11, 29, 58, 0.88)',
+      headerAccent: '#d4af37',
+      headerSearchBg: 'rgba(7, 20, 43, 0.48)',
+      headerSearchBorder: 'rgba(212, 175, 55, 0.34)',
+      headerSearchFocusBorder: '#e2c16b',
+      pageBg: '#f5f7fb',
+      cardBg: '#ffffff',
+      cardBorder: '#dfe5ef',
+      cardTintBg: '#f4f7fc',
+      cardTintBorder: '#d2dceb',
+      panelSubtleBg: '#f4f6fa',
+      dividerColor: '#e5ebf4',
+      inputBg: '#f9fafd',
+      inputBorder: '#cfd8e6',
+      inputFocusBorder: '#163e7a',
+      inputFocusRing: 'rgba(22, 62, 122, 0.14)',
+      tableHeaderBg: '#f0f4fa',
+      tableHeaderText: '#13315e',
+      tableRowHoverBg: '#f7f9fd',
+      tableBorder: '#e3e8f1',
+      highlightText: '#0b1d3a',
+      indicatorBg: '#f6f0da',
+      indicatorText: '#856513',
     },
     budget: {
       outerBorder: '#d5c3a8',
@@ -820,33 +920,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Carnaval',
     shortTag: 'Campanha',
     description:
-      'Roxo, magenta, amarelo, dourado e branco preservando integralmente o layout PREMIUM.',
+      'Ameixa real elegante com toques contidos de âmbar dourado sobre seda clara, mantendo sobriedade executiva.',
     motif: 'carnaval',
     badgeText: 'Carnaval',
-    paletteSwatches: ['#5b21b6', '#be185d', '#eab308', '#d4af37'],
+    paletteSwatches: ['#29143d', '#6d2899', '#cfa030', '#faf8fc'],
     crm: {
-      primary: '#6d28d9',
-      primaryHover: '#5b21b6',
-      secondary: '#be185d',
-      accent: '#eab308',
-      sidebarBg: '#2e1065',
-      sidebarFooterBg: '#1e0a45',
-      sidebarBorder: '#5b21b6',
-      sidebarText: '#f5f3ff',
-      sidebarMuted: '#ddd6fe',
-      sidebarHoverBg: 'rgba(234, 179, 8, 0.16)',
+      primary: '#6d2899',
+      primaryHover: '#581f7d',
+      secondary: '#3c1854',
+      secondaryHover: '#2b103d',
+      accent: '#cfa030',
+      sidebarBg: '#29143d',
+      sidebarFooterBg: '#1d0d2c',
+      sidebarBorder: '#442663',
+      sidebarText: '#f5f1fa',
+      sidebarMuted: '#cbbadd',
+      sidebarHoverBg: 'rgba(207, 160, 48, 0.13)',
+      sidebarActiveBg: '#6d2899',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#eab84b',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(46, 16, 101, 0.88)',
-      headerOverlayVia: 'rgba(131, 24, 67, 0.78)',
-      headerOverlayTo: 'rgba(46, 16, 101, 0.88)',
-      headerAccent: '#facc15',
-      pageBg: '#faf7fc',
-      cardTintBg: '#fdf2f8',
-      cardTintBorder: '#fbcfe8',
-      tableHeaderBg: '#f5f3ff',
-      tableHeaderText: '#5b21b6',
-      indicatorBg: '#fef08a',
-      indicatorText: '#6d28d9',
+      headerOverlayFrom: 'rgba(41, 20, 61, 0.88)',
+      headerOverlayVia: 'rgba(84, 30, 108, 0.74)',
+      headerOverlayTo: 'rgba(41, 20, 61, 0.88)',
+      headerAccent: '#dfb146',
+      headerSearchBg: 'rgba(25, 11, 38, 0.46)',
+      headerSearchBorder: 'rgba(223, 177, 70, 0.34)',
+      headerSearchFocusBorder: '#eab84b',
+      pageBg: '#faf8fc',
+      cardBg: '#ffffff',
+      cardBorder: '#e8e1ef',
+      cardTintBg: '#f9f5fc',
+      cardTintBorder: '#e2d2ee',
+      panelSubtleBg: '#f7f4fb',
+      dividerColor: '#ede7f4',
+      inputBg: '#fcfbfe',
+      inputBorder: '#dad0e5',
+      inputFocusBorder: '#6d2899',
+      inputFocusRing: 'rgba(109, 40, 153, 0.14)',
+      tableHeaderBg: '#f4eff9',
+      tableHeaderText: '#4c1d70',
+      tableRowHoverBg: '#fbf8fd',
+      tableBorder: '#ebe4f2',
+      highlightText: '#3b1557',
+      indicatorBg: '#f4eaf9',
+      indicatorText: '#6d2899',
     },
     budget: {
       outerBorder: '#d8b4fe',
@@ -954,33 +1072,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Páscoa',
     shortTag: 'Sazonal',
     description:
-      'Lilás, rosa suave, amarelo claro, verde suave e branco aplicados somente como paleta no modelo PREMIUM.',
+      'Lavanda fechada suave, sálvia botânica discreta e linho marfim para uma interface serena e equilibrada.',
     motif: 'pascoa',
     badgeText: 'Páscoa',
-    paletteSwatches: ['#9333ea', '#f472b6', '#fef08a', '#4ade80'],
+    paletteSwatches: ['#2e2242', '#654892', '#3c7a5c', '#faf9fc'],
     crm: {
-      primary: '#7e22ce',
-      primaryHover: '#6b21a8',
-      secondary: '#15803d',
-      accent: '#ec4899',
-      sidebarBg: '#3b1d54',
-      sidebarFooterBg: '#2a133d',
-      sidebarBorder: '#6b21a8',
-      sidebarText: '#faf5ff',
-      sidebarMuted: '#e9d5ff',
-      sidebarHoverBg: 'rgba(244, 114, 182, 0.16)',
+      primary: '#654892',
+      primaryHover: '#523978',
+      secondary: '#2f6b4f',
+      secondaryHover: '#24543e',
+      accent: '#5d9b7b',
+      sidebarBg: '#2e2242',
+      sidebarFooterBg: '#221833',
+      sidebarBorder: '#473663',
+      sidebarText: '#f4f1f8',
+      sidebarMuted: '#c6bad9',
+      sidebarHoverBg: 'rgba(167, 196, 181, 0.14)',
+      sidebarActiveBg: '#654892',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#9fd0b6',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(59, 29, 84, 0.88)',
-      headerOverlayVia: 'rgba(131, 41, 112, 0.72)',
-      headerOverlayTo: 'rgba(38, 87, 63, 0.80)',
-      headerAccent: '#f9a8d4',
-      pageBg: '#fcf9fe',
-      cardTintBg: '#faf5ff',
-      cardTintBorder: '#e9d5ff',
-      tableHeaderBg: '#f5f3ff',
-      tableHeaderText: '#6b21a8',
-      indicatorBg: '#dcfce7',
-      indicatorText: '#15803d',
+      headerOverlayFrom: 'rgba(46, 34, 66, 0.86)',
+      headerOverlayVia: 'rgba(72, 53, 102, 0.72)',
+      headerOverlayTo: 'rgba(42, 64, 54, 0.80)',
+      headerAccent: '#8ec0a6',
+      headerSearchBg: 'rgba(28, 20, 41, 0.46)',
+      headerSearchBorder: 'rgba(167, 196, 181, 0.34)',
+      headerSearchFocusBorder: '#a7d6bd',
+      pageBg: '#faf9fc',
+      cardBg: '#ffffff',
+      cardBorder: '#e6e2ec',
+      cardTintBg: '#f6f3fb',
+      cardTintBorder: '#dcd2ec',
+      panelSubtleBg: '#f7f5fa',
+      dividerColor: '#ebe7f1',
+      inputBg: '#fcfbfd',
+      inputBorder: '#d7d0e2',
+      inputFocusBorder: '#654892',
+      inputFocusRing: 'rgba(101, 72, 146, 0.14)',
+      tableHeaderBg: '#f3f0f9',
+      tableHeaderText: '#48326b',
+      tableRowHoverBg: '#faf8fd',
+      tableBorder: '#e9e4f0',
+      highlightText: '#372654',
+      indicatorBg: '#edf6f1',
+      indicatorText: '#275941',
     },
     budget: {
       outerBorder: '#dcc2fa',
@@ -1088,33 +1224,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Dia das Mães',
     shortTag: 'Homenagem',
     description:
-      'Rosa, rosé, dourado e branco adaptados exclusivamente em cores sobre o modelo PREMIUM.',
+      'Marsala rosé refinado, champagne suave e porcelana acolhedora com visual editorial limpo e elegante.',
     motif: 'dia_das_maes',
     badgeText: 'Dia das Mães',
-    paletteSwatches: ['#be185d', '#fb7185', '#d4af37', '#ffffff'],
+    paletteSwatches: ['#3b1524', '#9e2a52', '#d4af63', '#fcf9fa'],
     crm: {
-      primary: '#be185d',
-      primaryHover: '#9d174d',
-      secondary: '#b48a1e',
-      accent: '#fb7185',
-      sidebarBg: '#4c0f2b',
-      sidebarFooterBg: '#36091e',
-      sidebarBorder: '#831843',
-      sidebarText: '#fff1f2',
-      sidebarMuted: '#fecdd3',
-      sidebarHoverBg: 'rgba(251, 113, 133, 0.16)',
+      primary: '#9e2a52',
+      primaryHover: '#822042',
+      secondary: '#521b30',
+      secondaryHover: '#3d1323',
+      accent: '#cfa454',
+      sidebarBg: '#3b1524',
+      sidebarFooterBg: '#2a0d19',
+      sidebarBorder: '#5d263b',
+      sidebarText: '#fbf2f5',
+      sidebarMuted: '#dbb6c3',
+      sidebarHoverBg: 'rgba(207, 164, 84, 0.13)',
+      sidebarActiveBg: '#9e2a52',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#e6c27a',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(76, 15, 43, 0.88)',
-      headerOverlayVia: 'rgba(131, 24, 67, 0.72)',
-      headerOverlayTo: 'rgba(76, 15, 43, 0.88)',
-      headerAccent: '#fda4af',
-      pageBg: '#fdf8fa',
-      cardTintBg: '#fff1f2',
-      cardTintBorder: '#fecdd3',
-      tableHeaderBg: '#fff1f2',
-      tableHeaderText: '#9d174d',
-      indicatorBg: '#ffe4e6',
-      indicatorText: '#be185d',
+      headerOverlayFrom: 'rgba(59, 21, 36, 0.88)',
+      headerOverlayVia: 'rgba(108, 33, 60, 0.74)',
+      headerOverlayTo: 'rgba(59, 21, 36, 0.86)',
+      headerAccent: '#ddb56b',
+      headerSearchBg: 'rgba(36, 11, 21, 0.46)',
+      headerSearchBorder: 'rgba(221, 181, 107, 0.34)',
+      headerSearchFocusBorder: '#e8c784',
+      pageBg: '#fcf9fa',
+      cardBg: '#ffffff',
+      cardBorder: '#ede1e5',
+      cardTintBg: '#fdf4f7',
+      cardTintBorder: '#ecd0da',
+      panelSubtleBg: '#faf5f7',
+      dividerColor: '#f1e7ea',
+      inputBg: '#fdfbfc',
+      inputBorder: '#e1d1d7',
+      inputFocusBorder: '#9e2a52',
+      inputFocusRing: 'rgba(158, 42, 82, 0.14)',
+      tableHeaderBg: '#f9f1f4',
+      tableHeaderText: '#6e1b39',
+      tableRowHoverBg: '#fdf8fa',
+      tableBorder: '#efe4e8',
+      highlightText: '#57152d',
+      indicatorBg: '#faeef2',
+      indicatorText: '#8a2246',
     },
     budget: {
       outerBorder: '#efc5ce',
@@ -1222,33 +1376,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Dia dos Pais',
     shortTag: 'Homenagem',
     description:
-      'Azul-marinho, grafite, prata e branco aplicados exatamente sobre a estrutura PREMIUM.',
+      'Azul petróleo clássico, grafite metálico e prata fria com estética executiva precisa e atemporal.',
     motif: 'dia_dos_pais',
     badgeText: 'Dia dos Pais',
-    paletteSwatches: ['#0f294a', '#334155', '#cbd5e1', '#ffffff'],
+    paletteSwatches: ['#111c2d', '#1e4268', '#94a3b8', '#f3f5f8'],
     crm: {
-      primary: '#1e3a5f',
-      primaryHover: '#0f294a',
-      secondary: '#475569',
+      primary: '#1e4268',
+      primaryHover: '#153250',
+      secondary: '#334155',
+      secondaryHover: '#1e293b',
       accent: '#94a3b8',
-      sidebarBg: '#0f172a',
-      sidebarFooterBg: '#090d16',
-      sidebarBorder: '#334155',
-      sidebarText: '#e2e8f0',
-      sidebarMuted: '#94a3b8',
+      sidebarBg: '#111c2d',
+      sidebarFooterBg: '#0b1320',
+      sidebarBorder: '#263850',
+      sidebarText: '#edf2f7',
+      sidebarMuted: '#a2b2c5',
       sidebarHoverBg: 'rgba(148, 163, 184, 0.14)',
+      sidebarActiveBg: '#1e4268',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#cbd5e1',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(15, 23, 42, 0.90)',
-      headerOverlayVia: 'rgba(30, 41, 59, 0.78)',
-      headerOverlayTo: 'rgba(15, 23, 42, 0.90)',
+      headerOverlayFrom: 'rgba(17, 28, 45, 0.88)',
+      headerOverlayVia: 'rgba(30, 51, 80, 0.74)',
+      headerOverlayTo: 'rgba(17, 28, 45, 0.88)',
       headerAccent: '#cbd5e1',
-      pageBg: '#f1f5f9',
-      cardTintBg: '#f8fafc',
-      cardTintBorder: '#cbd5e1',
-      tableHeaderBg: '#f1f5f9',
-      tableHeaderText: '#1e293b',
-      indicatorBg: '#e2e8f0',
-      indicatorText: '#0f294a',
+      headerSearchBg: 'rgba(11, 19, 32, 0.48)',
+      headerSearchBorder: 'rgba(203, 213, 225, 0.30)',
+      headerSearchFocusBorder: '#e2e8f0',
+      pageBg: '#f3f5f8',
+      cardBg: '#ffffff',
+      cardBorder: '#dde3ec',
+      cardTintBg: '#f2f5f9',
+      cardTintBorder: '#ccd6e3',
+      panelSubtleBg: '#f4f6f9',
+      dividerColor: '#e4e9f0',
+      inputBg: '#f8fafc',
+      inputBorder: '#cbd5e1',
+      inputFocusBorder: '#1e4268',
+      inputFocusRing: 'rgba(30, 66, 104, 0.14)',
+      tableHeaderBg: '#eef2f6',
+      tableHeaderText: '#1b314b',
+      tableRowHoverBg: '#f6f8fb',
+      tableBorder: '#e2e7ef',
+      highlightText: '#111c2d',
+      indicatorBg: '#e7edf4',
+      indicatorText: '#1e4268',
     },
     budget: {
       outerBorder: '#dce1ea',
@@ -1356,33 +1528,51 @@ export const STATIC_THEME_DEFINITIONS: Record<
     name: 'Halloween',
     shortTag: 'Temático',
     description:
-      'Preto, roxo, laranja e branco aplicados exclusivamente como cores sobre o modelo PREMIUM.',
+      'Berinjela grafite, terracota queimada sofisticada e pergaminho claro com equilíbrio e legibilidade moderna.',
     motif: 'halloween',
     badgeText: 'Halloween',
-    paletteSwatches: ['#111827', '#581c87', '#ea580c', '#ffffff'],
+    paletteSwatches: ['#1f1726', '#b84a1b', '#d99b43', '#faf8f6'],
     crm: {
-      primary: '#ea580c',
-      primaryHover: '#c2410c',
-      secondary: '#581c87',
-      accent: '#f97316',
-      sidebarBg: '#120d1d',
-      sidebarFooterBg: '#090610',
-      sidebarBorder: '#3b1c63',
-      sidebarText: '#f3e8ff',
-      sidebarMuted: '#fdba74',
-      sidebarHoverBg: 'rgba(234, 88, 12, 0.14)',
+      primary: '#b84a1b',
+      primaryHover: '#993c14',
+      secondary: '#462a57',
+      secondaryHover: '#351f42',
+      accent: '#d99b43',
+      sidebarBg: '#1f1726',
+      sidebarFooterBg: '#150f1a',
+      sidebarBorder: '#3a2c47',
+      sidebarText: '#f4eff7',
+      sidebarMuted: '#c5b3d4',
+      sidebarHoverBg: 'rgba(217, 155, 67, 0.13)',
+      sidebarActiveBg: '#b84a1b',
+      sidebarActiveText: '#ffffff',
+      sidebarActiveAccent: '#eab05c',
       logoLightBackdrop: false,
-      headerOverlayFrom: 'rgba(17, 12, 29, 0.92)',
-      headerOverlayVia: 'rgba(88, 28, 135, 0.78)',
-      headerOverlayTo: 'rgba(17, 12, 29, 0.92)',
-      headerAccent: '#fb923c',
-      pageBg: '#faf7f5',
-      cardTintBg: '#fff7ed',
-      cardTintBorder: '#fed7aa',
-      tableHeaderBg: '#f3e8ff',
-      tableHeaderText: '#581c87',
-      indicatorBg: '#ffedd5',
-      indicatorText: '#c2410c',
+      headerOverlayFrom: 'rgba(31, 23, 38, 0.88)',
+      headerOverlayVia: 'rgba(66, 35, 56, 0.75)',
+      headerOverlayTo: 'rgba(31, 23, 38, 0.88)',
+      headerAccent: '#e0964a',
+      headerSearchBg: 'rgba(21, 15, 26, 0.48)',
+      headerSearchBorder: 'rgba(224, 150, 74, 0.34)',
+      headerSearchFocusBorder: '#f0b069',
+      pageBg: '#faf8f6',
+      cardBg: '#ffffff',
+      cardBorder: '#ebe3dd',
+      cardTintBg: '#fdf5ef',
+      cardTintBorder: '#ecd0bd',
+      panelSubtleBg: '#f8f4f1',
+      dividerColor: '#efe7e1',
+      inputBg: '#fcfaf8',
+      inputBorder: '#dfd3ca',
+      inputFocusBorder: '#b84a1b',
+      inputFocusRing: 'rgba(184, 74, 27, 0.14)',
+      tableHeaderBg: '#f6f0eb',
+      tableHeaderText: '#5e2d18',
+      tableRowHoverBg: '#fcf8f5',
+      tableBorder: '#ede5df',
+      highlightText: '#382045',
+      indicatorBg: '#faece2',
+      indicatorText: '#993c14',
     },
     budget: {
       outerBorder: '#d8c5eb',
@@ -1495,47 +1685,71 @@ export function buildCustomThemeDefinition(custom: CustomThemeConfig): FenixThem
   const buttonBg = c.buttonBg || secondary;
 
   const primaryHover = adjustHex(buttonBg, -18);
-  const softTint = hexToRgba(primary, 0.08);
-  const softBorder = hexToRgba(primary, 0.28);
-  const lightAccentTint = hexToRgba(accent, 0.14);
+  const secondaryHover = adjustHex(secondary, -16);
+  const softTint = mixHexWithWhite(primary, 0.94);
+  const softBorder = mixHexWithWhite(primary, 0.78);
+  const subtlePanel = mixHexWithWhite(primary, 0.965);
+  const pageBg = mixHexWithWhite(primary, 0.96);
+  const lightAccentTint = mixHexWithWhite(accent, 0.88);
   const sidebarLightBg = isLightColor(headerBg);
+  const buttonLightBg = isLightColor(buttonBg);
   const bannerLightBg = isLightColor(headerBg);
   const sectionLightBg = isLightColor(secondary);
   const headerDarkEnd = adjustHex(headerBg, -28);
   const sectionDark = adjustHex(primary, -20);
+  const safeHighlightText = isLightColor(primary) ? '#0f172a' : adjustHex(primary, -18);
+  const safeTableText = isLightColor(primary) ? '#1e293b' : adjustHex(primary, -12);
 
   return {
     id: 'personalizado',
     name: 'Personalizado',
     shortTag: 'Customizável',
     description:
-      'Cores escolhidas manualmente mantendo exatamente a estrutura oficial do modelo PREMIUM.',
+      'Paleta sob medida aplicada com harmonia e alta legibilidade em menus, cabeçalhos, cards, tabelas e botões.',
     motif: 'nenhum',
     badgeText: 'Personalizado',
-    paletteSwatches: [primary, secondary, accent, headerBg],
+    paletteSwatches: [headerBg, buttonBg, accent, pageBg],
     crm: {
       primary: buttonBg,
       primaryHover,
       secondary,
+      secondaryHover,
       accent,
       sidebarBg: headerBg,
-      sidebarFooterBg: adjustHex(headerBg, -12),
-      sidebarBorder: adjustHex(headerBg, 18),
+      sidebarFooterBg: adjustHex(headerBg, -14),
+      sidebarBorder: sidebarLightBg ? adjustHex(headerBg, -18) : adjustHex(headerBg, 22),
       sidebarText: sidebarLightBg ? '#0f172a' : '#f1f5f9',
       sidebarMuted: sidebarLightBg ? '#475569' : '#cbd5e1',
-      sidebarHoverBg: sidebarLightBg ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.1)',
+      sidebarHoverBg: sidebarLightBg ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.09)',
+      sidebarActiveBg: buttonBg,
+      sidebarActiveText: buttonLightBg ? '#0f172a' : '#ffffff',
+      sidebarActiveAccent: accent,
       logoLightBackdrop: false,
-      headerOverlayFrom: hexToRgba(headerBg, 0.9),
+      headerOverlayFrom: hexToRgba(headerBg, 0.88),
       headerOverlayVia: hexToRgba(primary, 0.72),
       headerOverlayTo: hexToRgba(headerBg, 0.88),
       headerAccent: accent,
-      pageBg: '#f4f6fa',
+      headerSearchBg: 'rgba(0, 0, 0, 0.40)',
+      headerSearchBorder: hexToRgba(accent, 0.45),
+      headerSearchFocusBorder: accent,
+      pageBg,
+      cardBg: '#ffffff',
+      cardBorder: mixHexWithWhite(primary, 0.85),
       cardTintBg: softTint,
       cardTintBorder: softBorder,
-      tableHeaderBg: softTint,
-      tableHeaderText: primary,
+      panelSubtleBg: subtlePanel,
+      dividerColor: mixHexWithWhite(primary, 0.88),
+      inputBg: subtlePanel,
+      inputBorder: mixHexWithWhite(primary, 0.76),
+      inputFocusBorder: buttonBg,
+      inputFocusRing: hexToRgba(buttonBg, 0.16),
+      tableHeaderBg: mixHexWithWhite(primary, 0.92),
+      tableHeaderText: safeTableText,
+      tableRowHoverBg: mixHexWithWhite(primary, 0.96),
+      tableBorder: mixHexWithWhite(primary, 0.87),
+      highlightText: safeHighlightText,
       indicatorBg: lightAccentTint,
-      indicatorText: primary,
+      indicatorText: safeTableText,
     },
     budget: {
       outerBorder: softBorder,
@@ -1826,23 +2040,11 @@ export function shouldApplyToTarget(
   const effectiveId = getEffectiveActiveThemeId(state);
   if (effectiveId === 'padrao') return false;
 
+  // Separação obrigatória: temas do CRM nunca alteram modelos ou PDFs de orçamento
   if (target === 'crm') {
-    return (
-      state.applyToSystem &&
-      (state.scope === 'crm' || state.scope === 'ambos')
-    );
+    return true;
   }
-  if (target === 'orcamento') {
-    return (
-      state.applyToBudgets &&
-      (state.scope === 'orcamentos' || state.scope === 'ambos')
-    );
-  }
-  return (
-    state.applyToPdf &&
-    state.applyToBudgets &&
-    (state.scope === 'orcamentos' || state.scope === 'ambos')
-  );
+  return false;
 }
 
 export function resolveThemeForTarget(target: 'crm' | 'orcamento' | 'pdf'): {
@@ -1853,6 +2055,18 @@ export function resolveThemeForTarget(target: 'crm' | 'orcamento' | 'pdf'): {
   state: FenixThemeState;
 } {
   const state = getThemeState();
+
+  // Temas de orçamento permanecem 100% independentes dentro de Orçamentos
+  if (target === 'orcamento' || target === 'pdf') {
+    return {
+      theme: STATIC_THEME_DEFINITIONS.padrao,
+      isThemed: false,
+      showDecorations: false,
+      isPreview: false,
+      state,
+    };
+  }
+
   const effectiveId = getEffectiveActiveThemeId(state);
   const customCfg =
     effectiveId === 'personalizado' && currentPreviewCustomOverride
@@ -1860,21 +2074,13 @@ export function resolveThemeForTarget(target: 'crm' | 'orcamento' | 'pdf'): {
       : state.customTheme;
 
   const isPreview = Boolean(currentPreviewThemeId);
-  const applies =
-    effectiveId !== 'padrao' &&
-    (isPreview
-      ? target === 'crm'
-        ? state.scope === 'crm' || state.scope === 'ambos'
-        : target === 'orcamento'
-          ? state.scope === 'orcamentos' || state.scope === 'ambos'
-          : state.applyToPdf && (state.scope === 'orcamentos' || state.scope === 'ambos')
-      : shouldApplyToTarget(state, target));
+  const applies = effectiveId !== 'padrao';
 
   const resolvedTheme = applies
     ? getThemeDefinition(effectiveId, customCfg)
     : STATIC_THEME_DEFINITIONS.padrao;
 
-  // Orçamentos e PDFs seguem rigorosamente o modelo PREMIUM com substituição exclusiva de cores
+  // Regra de design: zero ilustrações ou ícones decorativos no CRM
   const showDecorations = false;
 
   return {
@@ -1886,6 +2092,43 @@ export function resolveThemeForTarget(target: 'crm' | 'orcamento' | 'pdf'): {
   };
 }
 
+const CRM_CSS_VAR_KEYS = [
+  '--fenix-primary',
+  '--fenix-primary-hover',
+  '--fenix-secondary',
+  '--fenix-secondary-hover',
+  '--fenix-accent',
+  '--fenix-sidebar-bg',
+  '--fenix-sidebar-footer',
+  '--fenix-sidebar-border',
+  '--fenix-sidebar-text',
+  '--fenix-sidebar-muted',
+  '--fenix-sidebar-hover',
+  '--fenix-sidebar-active-bg',
+  '--fenix-sidebar-active-text',
+  '--fenix-sidebar-active-accent',
+  '--fenix-header-accent',
+  '--fenix-header-search-focus',
+  '--fenix-page-bg',
+  '--fenix-card-bg',
+  '--fenix-card-border',
+  '--fenix-card-tint-bg',
+  '--fenix-card-tint-border',
+  '--fenix-panel-subtle-bg',
+  '--fenix-divider-color',
+  '--fenix-input-bg',
+  '--fenix-input-border',
+  '--fenix-input-focus-border',
+  '--fenix-input-focus-ring',
+  '--fenix-table-header-bg',
+  '--fenix-table-header-text',
+  '--fenix-table-row-hover',
+  '--fenix-table-border',
+  '--fenix-highlight-text',
+  '--fenix-indicator-bg',
+  '--fenix-indicator-text',
+];
+
 export function applyThemeToDocument(): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
@@ -1894,19 +2137,7 @@ export function applyThemeToDocument(): void {
   if (!isThemed) {
     root.removeAttribute('data-fenix-crm-theme');
     root.setAttribute('data-fenix-theme-id', 'padrao');
-    root.style.removeProperty('--fenix-primary');
-    root.style.removeProperty('--fenix-primary-hover');
-    root.style.removeProperty('--fenix-secondary');
-    root.style.removeProperty('--fenix-accent');
-    root.style.removeProperty('--fenix-sidebar-bg');
-    root.style.removeProperty('--fenix-sidebar-footer');
-    root.style.removeProperty('--fenix-page-bg');
-    root.style.removeProperty('--fenix-card-tint-bg');
-    root.style.removeProperty('--fenix-card-tint-border');
-    root.style.removeProperty('--fenix-table-header-bg');
-    root.style.removeProperty('--fenix-table-header-text');
-    root.style.removeProperty('--fenix-indicator-bg');
-    root.style.removeProperty('--fenix-indicator-text');
+    CRM_CSS_VAR_KEYS.forEach((prop) => root.style.removeProperty(prop));
     return;
   }
 
@@ -1915,14 +2146,35 @@ export function applyThemeToDocument(): void {
   root.style.setProperty('--fenix-primary', theme.crm.primary);
   root.style.setProperty('--fenix-primary-hover', theme.crm.primaryHover);
   root.style.setProperty('--fenix-secondary', theme.crm.secondary);
+  root.style.setProperty('--fenix-secondary-hover', theme.crm.secondaryHover);
   root.style.setProperty('--fenix-accent', theme.crm.accent);
   root.style.setProperty('--fenix-sidebar-bg', theme.crm.sidebarBg);
   root.style.setProperty('--fenix-sidebar-footer', theme.crm.sidebarFooterBg);
+  root.style.setProperty('--fenix-sidebar-border', theme.crm.sidebarBorder);
+  root.style.setProperty('--fenix-sidebar-text', theme.crm.sidebarText);
+  root.style.setProperty('--fenix-sidebar-muted', theme.crm.sidebarMuted);
+  root.style.setProperty('--fenix-sidebar-hover', theme.crm.sidebarHoverBg);
+  root.style.setProperty('--fenix-sidebar-active-bg', theme.crm.sidebarActiveBg);
+  root.style.setProperty('--fenix-sidebar-active-text', theme.crm.sidebarActiveText);
+  root.style.setProperty('--fenix-sidebar-active-accent', theme.crm.sidebarActiveAccent);
+  root.style.setProperty('--fenix-header-accent', theme.crm.headerAccent);
+  root.style.setProperty('--fenix-header-search-focus', theme.crm.headerSearchFocusBorder);
   root.style.setProperty('--fenix-page-bg', theme.crm.pageBg);
+  root.style.setProperty('--fenix-card-bg', theme.crm.cardBg);
+  root.style.setProperty('--fenix-card-border', theme.crm.cardBorder);
   root.style.setProperty('--fenix-card-tint-bg', theme.crm.cardTintBg);
   root.style.setProperty('--fenix-card-tint-border', theme.crm.cardTintBorder);
+  root.style.setProperty('--fenix-panel-subtle-bg', theme.crm.panelSubtleBg);
+  root.style.setProperty('--fenix-divider-color', theme.crm.dividerColor);
+  root.style.setProperty('--fenix-input-bg', theme.crm.inputBg);
+  root.style.setProperty('--fenix-input-border', theme.crm.inputBorder);
+  root.style.setProperty('--fenix-input-focus-border', theme.crm.inputFocusBorder);
+  root.style.setProperty('--fenix-input-focus-ring', theme.crm.inputFocusRing);
   root.style.setProperty('--fenix-table-header-bg', theme.crm.tableHeaderBg);
   root.style.setProperty('--fenix-table-header-text', theme.crm.tableHeaderText);
+  root.style.setProperty('--fenix-table-row-hover', theme.crm.tableRowHoverBg);
+  root.style.setProperty('--fenix-table-border', theme.crm.tableBorder);
+  root.style.setProperty('--fenix-highlight-text', theme.crm.highlightText);
   root.style.setProperty('--fenix-indicator-bg', theme.crm.indicatorBg);
   root.style.setProperty('--fenix-indicator-text', theme.crm.indicatorText);
 }

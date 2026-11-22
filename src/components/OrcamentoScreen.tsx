@@ -88,6 +88,10 @@ import {
   UserCategoryShortcut,
 } from '../utils/orcamentoShortcuts';
 import {
+  FLOORPLAN_QUICK_DRAFT_KEY,
+  QuickBudgetTransferDraft,
+} from '../utils/floorplanCalculator';
+import {
   isRodapeProduct,
   convertMetrosToBarras,
   calculateRodapeBarras,
@@ -667,6 +671,39 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
           } else {
             setHasDraftFromCalculator(true);
           }
+        }
+      }
+
+      // Importação automática de quantitativos vindos da Calculadora de Plantas -> Orçamento Rápido
+      const rawQuickDraft = localStorage.getItem(FLOORPLAN_QUICK_DRAFT_KEY);
+      if (rawQuickDraft && !initialOrcamento) {
+        const quickDraft = JSON.parse(rawQuickDraft) as QuickBudgetTransferDraft;
+        if (quickDraft && quickDraft.source === 'calculadora_plantas') {
+          if (quickDraft.clientId) {
+            setSelectedClientId(quickDraft.clientId);
+          }
+          if (quickDraft.clientType) {
+            setCustomClientType(quickDraft.clientType);
+            setPriceTable(getPriceTierFromClientType(quickDraft.clientType));
+          }
+          if (quickDraft.projectName) {
+            setNomeOrcamento((prev) => prev || `Orçamento - ${quickDraft.projectName}`);
+          }
+
+          setProductSubTab('rapido');
+          setQuickPisoSqm(quickDraft.pisoSqm || '');
+          setQuickRodapeMl(quickDraft.rodapeMl || '');
+          setQuickRipadoMode('m2');
+          setQuickRipadoSqm(quickDraft.ripadoSqm || '');
+          setQuickRipadoWidth('');
+          setQuickRipadoHeight('');
+          setQuickTetoSqm(quickDraft.tetoSqm || '');
+          setQuickMantaSqm(quickDraft.mantaSqm || '');
+
+          localStorage.removeItem(FLOORPLAN_QUICK_DRAFT_KEY);
+          showToast(
+            'Quantitativos da Calculadora de Plantas carregados no Orçamento Rápido! Confira e clique em Gerar Orçamento.'
+          );
         }
       }
     } catch {

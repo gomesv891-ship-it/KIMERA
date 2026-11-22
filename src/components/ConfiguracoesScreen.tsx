@@ -130,7 +130,7 @@ type TabType =
   | 'Segurança & Acesso'
   | 'Mensagem WhatsApp'
   | 'Mensagem de Orçamento'
-  | 'Temas e Decorações';
+  | 'Temas e Personalização';
 
 export interface FenixUser {
   id: string;
@@ -1444,7 +1444,7 @@ export const ConfiguracoesScreen: React.FC<ConfiguracoesScreenProps> = ({
             { id: 'Notificações & Alertas', label: 'Notificações & Alertas', icon: Bell },
             { id: 'Segurança & Acesso', label: 'Segurança & Acesso', icon: Shield },
             { id: 'Mensagem WhatsApp', label: 'Mensagem WhatsApp', icon: MessageSquare },
-            { id: 'Temas e Decorações', label: 'Temas e Decorações', icon: Palette },
+            { id: 'Temas e Personalização', label: 'Temas e Personalização', icon: Palette },
           ] as { id: TabType; label: string; icon: React.FC<{ className?: string }> }[]
         ).map((tab) => {
           const Icon = tab.icon;
@@ -2541,8 +2541,8 @@ export const ConfiguracoesScreen: React.FC<ConfiguracoesScreenProps> = ({
         </div>
       )}
 
-      {/* 7. CONTEÚDO DA ABA: TEMAS E DECORAÇÕES */}
-      {activeTab === 'Temas e Decorações' && (
+      {/* 7. CONTEÚDO DA ABA: TEMAS E PERSONALIZAÇÃO */}
+      {activeTab === 'Temas e Personalização' && (
         <TemasDecoracoesSection onShowToast={showToast} />
       )}
 

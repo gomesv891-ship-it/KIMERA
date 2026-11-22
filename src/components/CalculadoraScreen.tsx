@@ -26,6 +26,7 @@ import {
   Package,
   AlertCircle,
   Sparkles,
+  Maximize,
 } from 'lucide-react';
 import { ClientRecord, ClientType, MaterialRow } from '../types';
 import {
@@ -58,7 +59,9 @@ import {
 } from '../data/productCatalog';
 import { addClientActivity } from '../utils/activities';
 import { filterClientsForUser } from '../utils/userDataFilter';
+import { useFenixTheme } from '../utils/themeService';
 import { ModalRendimentos } from './calculadora/ModalRendimentos';
+import { CalculadoraPlantasView } from './calculadora/CalculadoraPlantasView';
 import { loadRendimentosFromSupabase } from '../utils/rendimentosService';
 
 interface CalculadoraScreenProps {
@@ -315,6 +318,28 @@ export const CalculadoraScreen: React.FC<CalculadoraScreenProps> = ({
   onSelectClient,
   currentUserName = 'Vanessa Gomes',
 }) => {
+  const { theme: crmThemeSnapshot } = useFenixTheme('crm');
+  const crm = crmThemeSnapshot.crm;
+
+  const [activeSubTab, setActiveSubTab] = useState<'materiais' | 'plantas'>(() => {
+    try {
+      return sessionStorage.getItem('fenix_calculadora_subtab') === 'plantas'
+        ? 'plantas'
+        : 'materiais';
+    } catch {
+      return 'materiais';
+    }
+  });
+
+  const handleSwitchSubTab = (tab: 'materiais' | 'plantas') => {
+    setActiveSubTab(tab);
+    try {
+      sessionStorage.setItem('fenix_calculadora_subtab', tab);
+    } catch {
+      // ignore
+    }
+  };
+
   // Clients list from local database
   const [clientsList, setClientsList] = useState<ClientRecord[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>(client?.id || '');
@@ -1030,18 +1055,24 @@ export const CalculadoraScreen: React.FC<CalculadoraScreenProps> = ({
           BREADCRUMB
          ======================================================= */}
       <nav className="flex items-center gap-2 text-xs sm:text-sm text-slate-500 font-medium">
-        <Home className="w-4 h-4 text-[#0057ff]" />
+        <Home
+          className="w-4 h-4"
+          style={activeSubTab === 'plantas' ? { color: crm.primary } : { color: '#0057ff' }}
+        />
         <span className="text-slate-300">›</span>
         <button
           type="button"
           onClick={onBackToCadastro}
-          className="text-slate-600 hover:text-[#0057ff] cursor-pointer transition-colors"
+          className="text-slate-600 cursor-pointer transition-colors"
         >
           Calculadora
         </button>
         <span className="text-slate-300">›</span>
-        <span className="text-[#071a52] font-semibold">
-          Calculadora de Materiais
+        <span
+          className="font-semibold"
+          style={activeSubTab === 'plantas' ? { color: crm.highlightText } : { color: '#071a52' }}
+        >
+          {activeSubTab === 'plantas' ? 'Calculadora de Plantas' : 'Calculadora de Materiais'}
         </span>
       </nav>
 
@@ -1050,34 +1081,100 @@ export const CalculadoraScreen: React.FC<CalculadoraScreenProps> = ({
          ======================================================= */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1">
         <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-[#0057ff] text-white flex items-center justify-center flex-shrink-0 shadow-md">
-            <Calculator className="w-6 h-6 stroke-[2]" />
+          <div
+            className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl text-white flex items-center justify-center flex-shrink-0 shadow-md"
+            style={
+              activeSubTab === 'plantas'
+                ? { backgroundColor: crm.primary }
+                : { backgroundColor: '#0057ff' }
+            }
+          >
+            {activeSubTab === 'plantas' ? (
+              <Maximize className="w-6 h-6 stroke-[2]" />
+            ) : (
+              <Calculator className="w-6 h-6 stroke-[2]" />
+            )}
           </div>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0057ff] tracking-tight">
-              Calculadora de Materiais
+            <h1
+              className="text-2xl sm:text-3xl font-extrabold tracking-tight"
+              style={activeSubTab === 'plantas' ? { color: crm.primary } : { color: '#0057ff' }}
+            >
+              {activeSubTab === 'plantas' ? 'Calculadora de Plantas' : 'Calculadora de Materiais'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-0.5 font-normal">
-              Calcule os materiais necessários para o seu projeto e adicione ao orçamento.
+              {activeSubTab === 'plantas'
+                ? 'Importe a planta como referência visual, adicione os ambientes manualmente e envie os quantitativos para o Orçamento Rápido.'
+                : 'Calcule os materiais necessários para o seu projeto e adicione ao orçamento.'}
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowRendimentosModal(true)}
-          className="self-start sm:self-center h-10 px-4 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-50 text-[#0057ff] font-semibold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
-          title="Cadastrar e gerenciar rendimentos técnicos da calculadora"
-        >
-          <Layers className="w-4 h-4 text-[#0057ff]" />
-          <span>Rendimentos</span>
-        </button>
+        {activeSubTab === 'materiais' && (
+          <button
+            type="button"
+            onClick={() => setShowRendimentosModal(true)}
+            className="self-start sm:self-center h-10 px-4 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-50 text-[#0057ff] font-semibold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
+            title="Cadastrar e gerenciar rendimentos técnicos da calculadora"
+          >
+            <Layers className="w-4 h-4 text-[#0057ff]" />
+            <span>Rendimentos</span>
+          </button>
+        )}
       </div>
 
       {/* =======================================================
-          MAIN CALCULATOR CONTAINER
+          SUBABAS DA CALCULADORA
          ======================================================= */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-7 space-y-6">
+      <div
+        className="inline-flex flex-wrap items-center gap-1.5 p-1.5 rounded-2xl border shadow-2xs"
+        style={{
+          backgroundColor: crm.cardBg,
+          borderColor: crm.cardBorder,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => handleSwitchSubTab('materiais')}
+          className="h-10 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer"
+          style={
+            activeSubTab === 'materiais'
+              ? { backgroundColor: crm.primary, color: '#ffffff' }
+              : { backgroundColor: 'transparent', color: '#475569' }
+          }
+        >
+          <Calculator className="w-4 h-4" />
+          <span>Calculadora de Materiais</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSwitchSubTab('plantas')}
+          className="h-10 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer"
+          style={
+            activeSubTab === 'plantas'
+              ? { backgroundColor: crm.primary, color: '#ffffff' }
+              : { backgroundColor: 'transparent', color: '#475569' }
+          }
+        >
+          <Maximize className="w-4 h-4" />
+          <span>Calculadora de Plantas</span>
+        </button>
+      </div>
+
+      {activeSubTab === 'plantas' ? (
+        <CalculadoraPlantasView
+          client={client}
+          onGoToOrcamento={onGoToOrcamento}
+          onSelectClient={onSelectClient}
+          currentUserName={currentUserName}
+        />
+      ) : (
+        <>
+          {/* =======================================================
+              MAIN CALCULATOR CONTAINER
+             ======================================================= */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 sm:p-7 space-y-6">
         {/* =======================================================
             TOP ROW: CLIENTE (OPCIONAL) & TIPO DE CLIENTE
            ======================================================= */}
@@ -2580,11 +2677,13 @@ export const CalculadoraScreen: React.FC<CalculadoraScreenProps> = ({
         </div>
       </div>
 
-      {/* =======================================================
-          MODAL: RENDIMENTOS DA CALCULADORA
-         ======================================================= */}
-      {showRendimentosModal && (
-        <ModalRendimentos onClose={() => setShowRendimentosModal(false)} />
+          {/* =======================================================
+              MODAL: RENDIMENTOS DA CALCULADORA
+             ======================================================= */}
+          {showRendimentosModal && (
+            <ModalRendimentos onClose={() => setShowRendimentosModal(false)} />
+          )}
+        </>
       )}
     </div>
   );

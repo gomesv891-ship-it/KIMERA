@@ -84,11 +84,8 @@ const PromocoesAtivasScreen = lazy(() =>
 
 export default function App() {
   const crmThemeSnapshot = useFenixTheme('crm');
-  const budgetThemeSnapshot = useFenixTheme('orcamento');
-  const isPreviewActive = crmThemeSnapshot.isPreview || budgetThemeSnapshot.isPreview;
-  const previewingTheme = crmThemeSnapshot.isPreview
-    ? crmThemeSnapshot.theme
-    : budgetThemeSnapshot.theme;
+  const isPreviewActive = crmThemeSnapshot.isPreview;
+  const previewingTheme = crmThemeSnapshot.theme;
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -692,12 +689,26 @@ export default function App() {
 
           {/* Barra de Pré-visualização de Tema (exibida somente durante Pré-visualizar) */}
           {isPreviewActive && (
-            <div className="no-print bg-slate-900 text-white px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-amber-400/40 shadow-sm z-20">
+            <div
+              className="no-print no-theme-override bg-slate-900 text-white px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b shadow-sm z-20"
+              style={{
+                backgroundColor: previewingTheme.crm.sidebarBg,
+                borderBottomColor: previewingTheme.crm.accent,
+              }}
+            >
               <div className="flex items-center gap-2.5 text-xs sm:text-sm">
-                <Eye className="w-4 h-4 text-amber-300 flex-shrink-0" />
+                <Eye
+                  className="w-4 h-4 flex-shrink-0"
+                  style={{ color: previewingTheme.crm.sidebarActiveAccent }}
+                />
                 <span>
                   Pré-visualizando o tema{' '}
-                  <strong className="text-amber-300 font-bold">{previewingTheme.name}</strong>{' '}
+                  <strong
+                    className="font-bold"
+                    style={{ color: previewingTheme.crm.sidebarActiveAccent }}
+                  >
+                    {previewingTheme.name}
+                  </strong>{' '}
                   (alteração temporária ainda não salva)
                 </span>
               </div>
@@ -713,7 +724,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => activateTheme(previewingTheme.id)}
-                  className="px-3.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                  className="px-3.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Ativar Tema Agora</span>
