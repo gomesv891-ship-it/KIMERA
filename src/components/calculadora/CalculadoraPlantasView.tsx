@@ -35,6 +35,7 @@ import {
   QuickBudgetTransferDraft,
   calculateFloorplanTotals,
   computeRoomMetrics,
+  createEmptyFloorplanRoom,
   formatPercentDisplay,
   formatPtBrNumber,
   formatQuickInputNumber,
@@ -46,17 +47,16 @@ import {
   deleteFloorplanProject,
   getStoredFloorplanProjects,
   loadActiveFloorplanDraft,
+  loadFloorplanProjectFullImage,
   loadFloorplanProjectsFromSupabase,
   saveActiveFloorplanDraft,
   saveFloorplanProject,
 } from '../../utils/floorplanStorageService';
 import {
-  FloorplanOcrAnalysisResult,
   FloorplanOcrProgress,
-  RecognizedFloorplanRoomDraft,
-  runLocalFloorplanRecognition,
+  normalizeRoomComparisonKey,
+  runLocalFloorplanRoomNamesRecognition,
 } from '../../utils/floorplanOcrEngine';
-import { FloorplanOcrReviewModal } from './FloorplanOcrReviewModal';
 import { FloorplanViewer, LoadedFloorplanAsset } from './FloorplanViewer';
 import { RoomGeometryModal } from './RoomGeometryModal';
 
@@ -124,12 +124,10 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
   const [asset, setAsset] = useState<LoadedFloorplanAsset | null>(null);
   const [viewerError, setViewerError] = useState<string>('');
 
-  // Local OCR recognition & conference modal state (optional, click-triggered)
+  // Local OCR recognition state (exclusivamente nomes dos ambientes, acionado por clique)
   const [isRecognizingOcr, setIsRecognizingOcr] = useState<boolean>(false);
   const [ocrProgress, setOcrProgress] = useState<FloorplanOcrProgress | null>(null);
   const [ocrError, setOcrError] = useState<string>('');
-  const [ocrResult, setOcrResult] = useState<FloorplanOcrAnalysisResult | null>(null);
-  const [isOcrReviewOpen, setIsOcrReviewOpen] = useState<boolean>(false);
 
   // Rooms & editable drafts
   const [rooms, setRooms] = useState<FloorplanRoom[]>([]);
@@ -137,6 +135,8 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
   const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(false);
   const [editingRoom, setEditingRoom] = useState<FloorplanRoom | null>(null);
   const roomListRef = useRef<HTMLDivElement>(null);
+  const roomsRef = useRef<FloorplanRoom[]>(rooms);
+  roomsRef.current = rooms;
 
   // Independent calculation settings & Materials selector (ONLY Piso Vinílico & Rodapés)
   const [pisoLossPercent, setPisoLossPercent] = useState<number>(10);
@@ -215,7 +215,9 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Load saved history from Supabase
+  const activeProjectLoadRef = useRef<string | null>(null);
+
+  // Load saved history from Supabase & subscribe to cross-device updates
   useEffect(() => {
     let active = true;
     setIsLoadingHistory(true);
@@ -226,8 +228,21 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
       .finally(() => {
         if (active) setIsLoadingHistory(false);
       });
+
+    const handleProjectsUpdated = () => {
+      if (!active) return;
+      loadFloorplanProjectsFromSupabase()
+        .then((list) => {
+          if (active) setSavedProjects(list);
+        })
+        .catch(() => {
+          if (active) setSavedProjects(getStoredFloorplanProjects());
+        });
+    };
+    window.addEventListener('fenix_floorplan_projects_updated', handleProjectsUpdated);
     return () => {
       active = false;
+      window.removeEventListener('fenix_floorplan_projects_updated', handleProjectsUpdated);
     };
   }, []);
 
@@ -372,9 +387,9 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
     }
   };
 
-  const handleIdentifyRoomsAndDimensions = async () => {
+  const handleIdentifyRooms = async () => {
     if (!asset?.previewDataUrl) {
-      setOcrError('Importe ou cole uma planta baixa antes de executar a identificação.');
+      setOcrError('Importe ou cole uma planta baixa antes de identificar os ambientes.');
       return;
     }
 
@@ -383,22 +398,77 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
     setOcrProgress({
       stage: 'preparing',
       progress: 5,
-      message: 'Iniciando reconhecimento local da planta...',
+      message: 'Preparando leitura da planta para identificar ambientes...',
     });
 
     try {
-      const existingNames = rooms.map((r) => r.name).filter(Boolean);
-      const result = await runLocalFloorplanRecognition({
+      const existingNames = roomsRef.current.map((r) => r.name).filter(Boolean);
+      const result = await runLocalFloorplanRoomNamesRecognition({
         previewDataUrl: asset.previewDataUrl,
         vectorTextTokens: asset.vectorTextTokens,
         existingRoomNames: existingNames,
         onProgress: setOcrProgress,
       });
 
-      setOcrResult(result);
-      setIsOcrReviewOpen(true);
+      const currentRooms = roomsRef.current;
+      const existingKeys = new Set(
+        currentRooms.map((r) => normalizeRoomComparisonKey(r.name || '')).filter(Boolean)
+      );
+
+      const roomsToAdd: FloorplanRoom[] = [];
+      const draftsToAdd: Record<string, RoomInputDrafts> = {};
+
+      for (let i = 0; i < result.roomNames.length; i++) {
+        const cleanName = result.roomNames[i].trim();
+        const key = normalizeRoomComparisonKey(cleanName);
+        if (!cleanName || !key || existingKeys.has(key)) {
+          continue;
+        }
+        existingKeys.add(key);
+
+        const newRoom: FloorplanRoom = {
+          id: `ocr_room_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+          name: cleanName,
+          widthMeters: null,
+          lengthMeters: null,
+          manualAreaSqm: null,
+          manualPerimeterMeters: null,
+          selected: true,
+          shapeType: 'rectangular',
+        };
+
+        roomsToAdd.push(newRoom);
+        draftsToAdd[newRoom.id] = buildInitialDraftsForRoom(newRoom);
+      }
+
+      if (roomsToAdd.length > 0) {
+        setRooms((prev) => [...roomsToAdd, ...prev]);
+        setRoomDrafts((prev) => ({
+          ...prev,
+          ...draftsToAdd,
+        }));
+        if (roomListRef.current) {
+          roomListRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        showFeedback(
+          `${roomsToAdd.length} ${
+            roomsToAdd.length === 1
+              ? 'ambiente identificado e adicionado'
+              : 'ambientes identificados e adicionados'
+          } ao início da lista!`
+        );
+      } else if (result.alreadyExistingCount > 0) {
+        showFeedback(
+          'Os ambientes identificados na planta já estão cadastrados na lista do projeto.'
+        );
+      } else {
+        showFeedback(
+          'Nenhum nome de ambiente legível foi identificado na planta. Você pode adicionar manualmente.',
+          'err'
+        );
+      }
     } catch (err: any) {
-      console.error('[OCR Planta] Falha no reconhecimento local:', err);
+      console.error('[OCR Planta] Falha ao identificar ambientes:', err);
       setOcrError(
         err?.message ||
           'Não foi possível processar a imagem por OCR. Você pode continuar cadastrando os ambientes manualmente.'
@@ -409,141 +479,103 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
     }
   };
 
-  const handleConfirmOcrRooms = (confirmedDrafts: RecognizedFloorplanRoomDraft[]) => {
-    if (confirmedDrafts.length === 0) {
-      setIsOcrReviewOpen(false);
-      return;
-    }
-
-    const existingKeys = new Set(
-      rooms.map((r) => r.name.trim().toLowerCase().replace(/\s+/g, ' '))
-    );
-
-    const roomsToAdd: FloorplanRoom[] = [];
-    const draftsToAdd: Record<string, RoomInputDrafts> = {};
-    let skippedDuplicates = 0;
-
-    for (let i = 0; i < confirmedDrafts.length; i++) {
-      const item = confirmedDrafts[i];
-      const normalizedName = item.name.trim();
-      const key = normalizedName.toLowerCase().replace(/\s+/g, ' ');
-      if (!normalizedName || existingKeys.has(key)) {
-        skippedDuplicates += 1;
-        continue;
-      }
-      existingKeys.add(key);
-
-      const hasBothSides =
-        item.widthMeters !== null &&
-        item.widthMeters > 0 &&
-        item.lengthMeters !== null &&
-        item.lengthMeters > 0;
-
-      const calcAreaFromSides = hasBothSides
-        ? Math.round(item.widthMeters! * item.lengthMeters! * 100) / 100
-        : null;
-      const calcPerimFromSides = hasBothSides
-        ? Math.round(2 * (item.widthMeters! + item.lengthMeters!) * 100) / 100
-        : null;
-
-      const needsManualArea =
-        item.areaSqm !== null &&
-        (!hasBothSides || item.isAreaOnly || item.areaSqm !== calcAreaFromSides);
-      const needsManualPerim =
-        item.perimeterMeters !== null &&
-        (!hasBothSides || item.perimeterMeters !== calcPerimFromSides);
-
-      const newRoom: FloorplanRoom = {
-        id: `ocr_room_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-        name: normalizedName,
-        widthMeters: item.widthMeters,
-        lengthMeters: item.lengthMeters,
-        manualAreaSqm: needsManualArea ? item.areaSqm : null,
-        manualPerimeterMeters: needsManualPerim ? item.perimeterMeters : null,
-        selected: true,
-      };
-
-      roomsToAdd.push(newRoom);
-      draftsToAdd[newRoom.id] = buildInitialDraftsForRoom(newRoom);
-    }
-
-    if (roomsToAdd.length > 0) {
-      setRooms((prev) => [...roomsToAdd, ...prev]);
-      setRoomDrafts((prev) => ({
-        ...prev,
-        ...draftsToAdd,
-      }));
-      if (roomListRef.current) {
-        roomListRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-      showFeedback(
-        `${roomsToAdd.length} ${
-          roomsToAdd.length === 1 ? 'ambiente adicionado' : 'ambientes adicionados'
-        } à lista do projeto!${
-          skippedDuplicates > 0 ? ` (${skippedDuplicates} duplicado(s) ignorado(s))` : ''
-        }`
-      );
-    } else if (skippedDuplicates > 0) {
-      showFeedback(
-        'Os ambientes selecionados já estavam cadastrados na lista do projeto.',
-        'err'
-      );
-    }
-
-    setIsOcrReviewOpen(false);
-  };
-
-  const nextDefaultRoomName = useMemo(() => {
-    const nextIndex =
+  const nextRoomNumber = useMemo(() => {
+    return (
       rooms.reduce((max, r) => {
         const match = /^Ambiente\s+(\d+)$/i.exec((r.name || '').trim());
         return match ? Math.max(max, Number(match[1])) : max;
-      }, rooms.length) + 1;
-    return `Ambiente ${nextIndex}`;
+      }, rooms.length) + 1
+    );
   }, [rooms]);
 
-  // Room editing handlers
+  // Adiciona novo ambiente diretamente no início da lista para edição inline
   const handleAddRoom = () => {
-    setEditingRoom(null);
-    setIsRoomModalOpen(true);
+    const newRoom = createEmptyFloorplanRoom(nextRoomNumber);
+    setRooms((prev) => [newRoom, ...prev]);
+    setRoomDrafts((prev) => ({
+      ...prev,
+      [newRoom.id]: buildInitialDraftsForRoom(newRoom),
+    }));
+    if (roomListRef.current) {
+      roomListRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
-  const handleOpenEditRoom = (room: FloorplanRoom) => {
+  // O lápis abre exclusivamente a configuração de cálculo irregular daquele ambiente
+  const handleOpenIrregularConfig = (room: FloorplanRoom) => {
     setEditingRoom(room);
     setIsRoomModalOpen(true);
   };
 
-  const handleSaveRoomFromModal = (savedRoom: FloorplanRoom) => {
+  const handleSaveIrregularFromModal = (savedRoom: FloorplanRoom) => {
     const exists = rooms.some((r) => r.id === savedRoom.id);
-    if (exists) {
-      setRooms((prev) => prev.map((r) => (r.id === savedRoom.id ? savedRoom : r)));
-      setRoomDrafts((prev) => ({
-        ...prev,
-        [savedRoom.id]: buildInitialDraftsForRoom(savedRoom),
-      }));
-      showFeedback(`Ambiente "${savedRoom.name}" atualizado.`);
-    } else {
-      setRooms((prev) => [savedRoom, ...prev]);
-      setRoomDrafts((prev) => ({
-        ...prev,
-        [savedRoom.id]: buildInitialDraftsForRoom(savedRoom),
-      }));
-      if (roomListRef.current) {
-        roomListRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-      showFeedback(`Ambiente "${savedRoom.name}" adicionado ao projeto.`);
+    if (!exists) {
+      setIsRoomModalOpen(false);
+      setEditingRoom(null);
+      return;
     }
+
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.id === savedRoom.id
+          ? {
+              ...r,
+              manualAreaSqm: savedRoom.manualAreaSqm,
+              manualPerimeterMeters: savedRoom.manualPerimeterMeters,
+              shapeType: 'irregular',
+              irregularData: savedRoom.irregularData,
+            }
+          : r
+      )
+    );
+    setRoomDrafts((prev) => ({
+      ...prev,
+      [savedRoom.id]: buildInitialDraftsForRoom(savedRoom),
+    }));
+    showFeedback(
+      `Cálculo irregular de "${savedRoom.name || 'Ambiente'}" salvo e atualizado.`
+    );
     setIsRoomModalOpen(false);
     setEditingRoom(null);
   };
 
-  const handleDeleteRoom = (id: string) => {
-    setRooms((prev) => prev.filter((r) => r.id !== id));
+  const handleRevertToRectangular = (roomId: string) => {
+    const target = rooms.find((r) => r.id === roomId);
+    if (!target) return;
+
+    const updated: FloorplanRoom = {
+      ...target,
+      shapeType: 'rectangular',
+      manualAreaSqm: null,
+      manualPerimeterMeters: null,
+      irregularData: undefined,
+    };
+
+    setRooms((prev) => prev.map((r) => (r.id === roomId ? updated : r)));
+    setRoomDrafts((prev) => ({
+      ...prev,
+      [roomId]: buildInitialDraftsForRoom(updated),
+    }));
+    setIsRoomModalOpen(false);
+    setEditingRoom(null);
+    showFeedback(
+      `Ambiente "${target.name || 'selecionado'}" retornou ao cálculo retangular.`
+    );
+  };
+
+  const handleDeleteRoom = (room: FloorplanRoom) => {
+    const deletedName = room.name?.trim();
+    setRooms((prev) => prev.filter((r) => r.id !== room.id));
     setRoomDrafts((prev) => {
       const next = { ...prev };
-      delete next[id];
+      delete next[room.id];
       return next;
     });
+    showFeedback(
+      deletedName
+        ? `Ambiente "${deletedName}" excluído da lista.`
+        : 'Ambiente excluído da lista.'
+    );
   };
 
   const handleToggleRoomSelected = (id: string) => {
@@ -779,6 +811,7 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
   };
 
   const handleLoadSavedProject = (proj: SavedFloorplanProject) => {
+    activeProjectLoadRef.current = proj.id;
     setProjectId(proj.id);
     setProjectName(proj.name);
     setRooms(Array.isArray(proj.rooms) ? proj.rooms : []);
@@ -820,6 +853,19 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
         pageCount: 1,
         currentPage: 1,
       });
+
+      if (proj.id) {
+        loadFloorplanProjectFullImage(proj)
+          .then((fullUrl) => {
+            if (!fullUrl || activeProjectLoadRef.current !== proj.id) return;
+            setAsset((prev) =>
+              prev && fullUrl !== prev.previewDataUrl
+                ? { ...prev, previewDataUrl: fullUrl }
+                : prev
+            );
+          })
+          .catch(() => {});
+      }
     } else {
       setAsset(null);
     }
@@ -1303,14 +1349,14 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
 
             <button
               type="button"
-              onClick={() => void handleIdentifyRoomsAndDimensions()}
+              onClick={() => void handleIdentifyRooms()}
               disabled={!asset?.previewDataUrl || isRecognizingOcr}
               className="h-9 px-3.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-white flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs shrink-0 whitespace-nowrap disabled:opacity-45 disabled:cursor-not-allowed"
               style={{ backgroundColor: crm.primary }}
               title={
                 asset?.previewDataUrl
-                  ? 'Analisar textos e cotas da planta via OCR local'
-                  : 'Importe ou cole uma planta para habilitar o reconhecimento'
+                  ? 'Analisar a planta importada e reconhecer os nomes dos ambientes por OCR'
+                  : 'Importe ou cole uma planta para habilitar a identificação'
               }
             >
               {isRecognizingOcr ? (
@@ -1319,7 +1365,7 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
                 <ScanText className="w-3.5 h-3.5 shrink-0" />
               )}
               <span>
-                {isRecognizingOcr ? 'Processando...' : 'IDENTIFICAR AMBIENTES E DIMENSÕES'}
+                {isRecognizingOcr ? 'Identificando...' : 'IDENTIFICAR AMBIENTES'}
               </span>
             </button>
           </div>
@@ -1387,7 +1433,7 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
                 Ambientes do Projeto ({summary.selectedRoomsCount}/{summary.totalRoomsCount})
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Informe Largura × Comprimento ou digite Área e Perímetro para ambientes irregulares.
+                Edite nome, largura e comprimento na própria lista ou clique no lápis para cálculo irregular.
               </p>
             </div>
 
@@ -1478,7 +1524,7 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
                   Nenhum ambiente adicionado ainda
                 </p>
                 <p className="text-xs text-slate-500">
-                  Clique em "Adicionar Ambiente" no cabeçalho acima para lançar cômodos com Largura × Comprimento ou Área e Perímetro manuais.
+                  Importe a planta e clique em &quot;IDENTIFICAR AMBIENTES&quot; ou clique em &quot;Adicionar Ambiente&quot; para preencher nome, largura e comprimento diretamente na lista.
                 </p>
               </div>
             </div>
@@ -1571,28 +1617,25 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => handleOpenEditRoom(room)}
-                        className="h-8 px-2 rounded-lg border inline-flex items-center justify-center gap-1 text-[11px] font-bold transition-colors shrink-0 cursor-pointer"
+                        onClick={() => handleOpenIrregularConfig(room)}
+                        className="w-8 h-8 rounded-lg border inline-flex items-center justify-center transition-colors shrink-0 cursor-pointer"
                         style={{
-                          backgroundColor: crm.cardBg,
-                          borderColor: crm.cardBorder,
+                          backgroundColor: isIrregularRoom ? crm.cardTintBg : crm.cardBg,
+                          borderColor: isIrregularRoom ? crm.primary : crm.cardBorder,
                           color: crm.primary,
                         }}
-                        title={
-                          isIrregularRoom
-                            ? 'Editar trechos e formato irregular'
-                            : 'Editar ambiente'
-                        }
+                        title="Configurar cálculo irregular do ambiente"
+                        aria-label={`Configurar cálculo irregular de ${room.name || `Ambiente ${index + 1}`}`}
                       >
                         <Pencil className="w-3.5 h-3.5" />
-                        <span className="hidden md:inline">Editar</span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => handleDeleteRoom(room.id)}
+                        onClick={() => handleDeleteRoom(room)}
                         className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
                         title="Excluir ambiente"
+                        aria-label={`Excluir ${room.name || `Ambiente ${index + 1}`}`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1600,13 +1643,31 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
 
                     {isIrregularRoom ? (
                       <div className="flex flex-wrap items-center justify-between gap-2.5 pt-0.5">
-                        <div className="text-xs text-slate-600 font-medium">
-                          <span>Formato irregular</span>
-                          <span className="mx-1.5 text-slate-400">·</span>
-                          <span className="tabular-nums">
-                            {irregularSegmentsCount}{' '}
-                            {irregularSegmentsCount === 1 ? 'trecho' : 'trechos'}
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 font-medium">
+                          <span>
+                            {room.irregularData?.method === 'floorplan_trace'
+                              ? 'Contorno da planta'
+                              : 'Formato irregular'}{' '}
+                            ·{' '}
+                            <span className="tabular-nums">
+                              {irregularSegmentsCount}{' '}
+                              {irregularSegmentsCount === 1 ? 'trecho' : 'trechos'}
+                            </span>
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRevertToRectangular(room.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[11px] font-bold cursor-pointer hover:opacity-90 transition-opacity"
+                            style={{
+                              backgroundColor: crm.cardBg,
+                              borderColor: crm.cardTintBorder,
+                              color: crm.primary,
+                            }}
+                            title="Retornar ao cálculo retangular (Largura × Comprimento)"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Retornar ao retangular</span>
+                          </button>
                         </div>
 
                         <div className="flex items-center gap-2.5 tabular-nums">
@@ -2209,24 +2270,17 @@ export const CalculadoraPlantasView: React.FC<CalculadoraPlantasViewProps> = ({
         </div>
       </div>
 
-      {/* Modal de Conferência dos Ambientes e Dimensões Identificadas */}
-      <FloorplanOcrReviewModal
-        isOpen={isOcrReviewOpen}
-        result={ocrResult}
-        onClose={() => setIsOcrReviewOpen(false)}
-        onConfirm={handleConfirmOcrRooms}
-      />
-
-      {/* Modal de Cadastro / Edição de Ambiente Retangular ou Irregular */}
+      {/* Modal de Configuração de Cálculo Irregular (exclusivo do botão lápis) */}
       <RoomGeometryModal
         isOpen={isRoomModalOpen}
         editingRoom={editingRoom}
-        defaultRoomName={nextDefaultRoomName}
+        floorplanAsset={asset}
         onClose={() => {
           setIsRoomModalOpen(false);
           setEditingRoom(null);
         }}
-        onSave={handleSaveRoomFromModal}
+        onSave={handleSaveIrregularFromModal}
+        onRevertToRectangular={handleRevertToRectangular}
       />
     </div>
   );

@@ -83,6 +83,7 @@ import {
 import {
   getUserNotificationPreferences,
   saveUserNotificationPreferences,
+  loadUserNotificationPreferencesFromSupabase,
   UserNotificationPreferences,
   NotificationCategoryType,
   DEFAULT_SOUNDS_PER_TYPE,
@@ -721,6 +722,25 @@ export const ConfiguracoesScreen: React.FC<ConfiguracoesScreenProps> = ({
 
   useEffect(() => {
     setNotifPrefs(getUserNotificationPreferences(notifTargetUser));
+    let active = true;
+    loadUserNotificationPreferencesFromSupabase(notifTargetUser)
+      .then((hydrated) => {
+        if (active && hydrated) {
+          setNotifPrefs(hydrated);
+        }
+      })
+      .catch(() => {});
+
+    const handlePrefsUpdated = () => {
+      if (active) {
+        setNotifPrefs(getUserNotificationPreferences(notifTargetUser));
+      }
+    };
+    window.addEventListener('fenix_notif_prefs_updated', handlePrefsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('fenix_notif_prefs_updated', handlePrefsUpdated);
+    };
   }, [notifTargetUser]);
 
   // Estado da permissão do navegador para notificações externas

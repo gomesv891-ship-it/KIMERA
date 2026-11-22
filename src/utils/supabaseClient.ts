@@ -452,14 +452,19 @@ export const SYNC_COLLECTIONS: { key: string; label: string; description: string
   { key: 'fenix_estoque_insumos_v1', label: 'Insumos de Loja', description: 'Materiais de consumo e ferramentas' },
   { key: 'fenix_vendas_gerencial', label: 'Gestão de Vendas (Diretoria)', description: 'Vendas, custos, lucros e margens' },
   { key: 'fenix_marketplace_sales_db', label: 'Vendas Marketplace (Jeferson)', description: 'Lançamentos de vendas marketplace' },
+  { key: 'fenix_marketplace_metas_config', label: 'Metas Marketplace (Config)', description: 'Metas mensais Shopee e Mercado Livre' },
   { key: 'fenix_estoque_insumos_movs_v1', label: 'Insumos de Loja (Movimentações)', description: 'Entradas e saídas de insumos' },
   { key: 'fenix_product_costs_db', label: 'Custos dos Produtos (Diretoria)', description: 'Tabela oficial de custos' },
   { key: 'fenix_custos_estrutura_v1', label: 'Custos de Estrutura', description: 'Custos fixos e operacionais' },
   { key: 'fenix_custos_comissoes_v1', label: 'Custos de Comissões', description: 'Comissões comerciais' },
   { key: 'fenix_custos_nota_fiscal_v1', label: 'Custos de Nota Fiscal', description: 'Alíquotas fiscais' },
   { key: 'fenix_custos_rateio_v1', label: 'Custos de Rateio', description: 'Rateios de custos' },
+  { key: 'fenix_custos_pagamentos_v1', label: 'Custos de Pagamento', description: 'Taxas e condições de pagamento' },
+  { key: 'fenix_custos_marketplace_v1', label: 'Custos de Marketplace', description: 'Comissões e regras de marketplace' },
+  { key: 'fenix_custos_pedido_regras_v1', label: 'Regras de Custos por Pedido', description: 'Parâmetros de cálculo por pedido' },
   { key: 'fenix_custos_tarkett_itens_v1', label: 'Itens Tarkett', description: 'Tabela de itens e acabamentos Tarkett' },
   { key: 'fenix_tarkett_produtos_catalogo', label: 'Catálogo Tarkett', description: 'Produtos do catálogo Tarkett' },
+  { key: 'fenix_tarkett_simulacoes_v1', label: 'Simulações Tarkett', description: 'Simulações de custos e margens Tarkett' },
   { key: 'fenix_calculadora_rendimentos', label: 'Rendimentos da Calculadora', description: 'Base independente de rendimentos técnicos' },
   { key: 'fenix_calculadora_plantas_v1', label: 'Calculadora de Plantas', description: 'Plantas importadas, ambientes e cálculos salvos' },
   { key: 'fenix_custos_variaveis_v1', label: 'Custos Variáveis', description: 'Configuração de custos variáveis' },
@@ -468,6 +473,7 @@ export const SYNC_COLLECTIONS: { key: string; label: string; description: string
   { key: 'fenix_individual_metas_map', label: 'Metas Individuais', description: 'Metas individuais por consultora' },
   { key: 'fenix_promocoes_ativas_db', label: 'Promoções Ativas', description: 'Campanhas promocionais, lotes compartilhados e tabelas por modalidade' },
   { key: 'fenix_user_themes_v1', label: 'Temas por Usuário', description: 'Preferências individuais de tema por login' },
+  { key: 'fenix_notificacoes_config_v2', label: 'Preferências de Notificação', description: 'Preferências individuais de alertas e toques por usuário' },
   { key: 'fenix_deleted_records_v1', label: 'Registro de Exclusões', description: 'Controle de exclusões sincronizadas entre dispositivos' },
 ];
 
@@ -1180,6 +1186,9 @@ export function dispatchCollectionEvents(collectionKey: string) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event('storage'));
   if (collectionKey === 'fenix_clients_db') window.dispatchEvent(new Event('fenix_clients_updated'));
+  if (collectionKey === 'fenix_activities_db') window.dispatchEvent(new Event('fenix_activities_updated'));
+  if (collectionKey === 'fenix_calculadora_plantas_v1') window.dispatchEvent(new Event('fenix_floorplan_projects_updated'));
+  if (collectionKey === 'fenix_notificacoes_config_v2') window.dispatchEvent(new Event('fenix_notif_prefs_updated'));
   if (collectionKey.includes('orcamento')) window.dispatchEvent(new Event('fenix_orcamentos_updated'));
   if (collectionKey.includes('followup')) window.dispatchEvent(new Event('fenix_followup_updated'));
   if (collectionKey.includes('tarefas')) window.dispatchEvent(new Event('fenix_tarefas_updated'));
@@ -1425,8 +1434,13 @@ export function initSupabaseRealtimeSubscription(): (() => void) | null {
         (payload: any) => {
           if (payload?.new && payload.new.key && payload.new.data !== undefined) {
             const key = payload.new.key;
-            // Arquivos binários/PDFs em base64 não devem ser gravados via stream simples
-            if (key.startsWith('fenix_file_') || key.startsWith('fenix_test_')) {
+            // Arquivos binários/PDFs/imagens/áudios em base64 não devem ser gravados via stream simples
+            if (
+              key.startsWith('fenix_file_') ||
+              key.startsWith('fenix_test_') ||
+              key.startsWith('fenix_planta_img_') ||
+              key.startsWith('fenix_notif_audio_')
+            ) {
               return;
             }
 
@@ -1495,6 +1509,17 @@ export function initSupabaseRealtimeSubscription(): (() => void) | null {
                 if (currentLocalRaw !== strVal) {
                   setLocalCollectionSafe(key, strVal);
                   applyMirroredLocalKeys(key, mergedThemes);
+                }
+                return;
+              }
+
+              if (key === 'fenix_notificacoes_config_v2') {
+                const mergedNotifs = mergeUserNotifPrefsForSync(parsedData, localParsed);
+                const strVal = JSON.stringify(mergedNotifs);
+                if (currentLocalRaw !== strVal) {
+                  setLocalCollectionSafe(key, strVal);
+                  applyMirroredLocalKeys(key, mergedNotifs);
+                  dispatchCollectionEvents(key);
                 }
                 return;
               }
@@ -1573,9 +1598,9 @@ export function initSupabaseRealtimeSubscription(): (() => void) | null {
  * O sistema carrega os dados de cada módulo somente quando a aba for acessada.
  */
 export const TAB_COLLECTIONS_MAP: Record<string, string[]> = {
-  'Clientes': ['fenix_deleted_records_v1', 'fenix_clients_db', 'fenix_user_themes_v1'],
+  'Clientes': ['fenix_deleted_records_v1', 'fenix_clients_db', 'fenix_activities_db', 'fenix_user_themes_v1'],
   'Cadastro': ['fenix_deleted_records_v1', 'fenix_clients_db'],
-  'Calculadora': ['fenix_deleted_records_v1', 'fenix_clients_db', 'fenix_product_items_data', 'fenix_product_categories_data', 'fenix_product_groups_data', 'fenix_calculadora_rendimentos'],
+  'Calculadora': ['fenix_deleted_records_v1', 'fenix_clients_db', 'fenix_product_items_data', 'fenix_product_categories_data', 'fenix_product_groups_data', 'fenix_calculadora_rendimentos', 'fenix_calculadora_plantas_v1'],
   'Orçamentos': ['fenix_deleted_records_v1', 'fenix_clients_db', 'fenix_saved_orcamentos', 'fenix_orcamentos_history', 'fenix_product_items_data', 'fenix_product_categories_data', 'fenix_user_themes_v1'],
   'Agenda': ['fenix_deleted_records_v1', 'fenix_tarefas_db', 'fenix_clients_db'],
   'Tarefas': ['fenix_deleted_records_v1', 'fenix_tarefas_db', 'fenix_clients_db'],
@@ -1591,14 +1616,14 @@ export const TAB_COLLECTIONS_MAP: Record<string, string[]> = {
   'Pendências': ['fenix_deleted_records_v1', 'fenix_pendencias_v1'],
   'Pendencias': ['fenix_deleted_records_v1', 'fenix_pendencias_v1'],
   'Notas': ['fenix_deleted_records_v1', 'fenix_notes_db', 'fenix_notes_v1', 'fenix_anotacoes_db'],
-  'Metas': ['fenix_deleted_records_v1', 'fenix_metas_sales_db', 'fenix_followup_cards_v2', 'fenix_orcamentos_history', 'fenix_saved_orcamentos', 'fenix_clients_db', 'fenix_pos_vendas_db', 'fenix_deleted_vendas_ids', 'fenix_vendas_gerencial', 'fenix_metas_config_data', 'fenix_individual_metas_map'],
-  'Meta': ['fenix_deleted_records_v1', 'fenix_metas_sales_db', 'fenix_followup_cards_v2', 'fenix_orcamentos_history', 'fenix_saved_orcamentos', 'fenix_clients_db', 'fenix_pos_vendas_db', 'fenix_deleted_vendas_ids', 'fenix_vendas_gerencial', 'fenix_metas_config_data', 'fenix_individual_metas_map'],
+  'Metas': ['fenix_deleted_records_v1', 'fenix_metas_sales_db', 'fenix_marketplace_sales_db', 'fenix_marketplace_metas_config', 'fenix_followup_cards_v2', 'fenix_orcamentos_history', 'fenix_saved_orcamentos', 'fenix_clients_db', 'fenix_pos_vendas_db', 'fenix_deleted_vendas_ids', 'fenix_vendas_gerencial', 'fenix_metas_config_data', 'fenix_individual_metas_map'],
+  'Meta': ['fenix_deleted_records_v1', 'fenix_metas_sales_db', 'fenix_marketplace_sales_db', 'fenix_marketplace_metas_config', 'fenix_followup_cards_v2', 'fenix_orcamentos_history', 'fenix_saved_orcamentos', 'fenix_clients_db', 'fenix_pos_vendas_db', 'fenix_deleted_vendas_ids', 'fenix_vendas_gerencial', 'fenix_metas_config_data', 'fenix_individual_metas_map'],
   'Produtos': ['fenix_deleted_records_v1', 'fenix_product_items_data', 'fenix_product_categories_data', 'fenix_product_groups_data', 'fenix_product_costs_db', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo'],
   'Promoções Ativas': ['fenix_deleted_records_v1', 'fenix_promocoes_ativas_db', 'fenix_product_items_data', 'fenix_product_categories_data'],
   'Promocoes Ativas': ['fenix_deleted_records_v1', 'fenix_promocoes_ativas_db', 'fenix_product_items_data', 'fenix_product_categories_data'],
-  'Configurações': ['fenix_deleted_records_v1', 'fenix_usuarios_v2', 'fenix_auth_users_v2', 'fenix_custos_estrutura_v1', 'fenix_custos_rateio_v1', 'fenix_custos_comissoes_v1', 'fenix_custos_nota_fiscal_v1', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo', 'fenix_custos_variaveis_v1', 'fenix_whatsapp_templates_by_category', 'fenix_metas_config_data', 'fenix_individual_metas_map', 'fenix_user_themes_v1'],
-  'Configuracoes': ['fenix_deleted_records_v1', 'fenix_usuarios_v2', 'fenix_auth_users_v2', 'fenix_custos_estrutura_v1', 'fenix_custos_rateio_v1', 'fenix_custos_comissoes_v1', 'fenix_custos_nota_fiscal_v1', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo', 'fenix_custos_variaveis_v1', 'fenix_whatsapp_templates_by_category', 'fenix_metas_config_data', 'fenix_individual_metas_map', 'fenix_user_themes_v1'],
-  'Settings': ['fenix_deleted_records_v1', 'fenix_usuarios_v2', 'fenix_auth_users_v2', 'fenix_custos_estrutura_v1', 'fenix_custos_rateio_v1', 'fenix_custos_comissoes_v1', 'fenix_custos_nota_fiscal_v1', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo', 'fenix_custos_variaveis_v1', 'fenix_whatsapp_templates_by_category', 'fenix_metas_config_data', 'fenix_individual_metas_map', 'fenix_user_themes_v1'],
+  'Configurações': ['fenix_deleted_records_v1', 'fenix_usuarios_v2', 'fenix_auth_users_v2', 'fenix_notificacoes_config_v2', 'fenix_custos_estrutura_v1', 'fenix_custos_rateio_v1', 'fenix_custos_comissoes_v1', 'fenix_custos_nota_fiscal_v1', 'fenix_custos_pagamentos_v1', 'fenix_custos_marketplace_v1', 'fenix_custos_pedido_regras_v1', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo', 'fenix_tarkett_simulacoes_v1', 'fenix_custos_variaveis_v1', 'fenix_whatsapp_templates_by_category', 'fenix_metas_config_data', 'fenix_individual_metas_map', 'fenix_user_themes_v1'],
+  'Configuracoes': ['fenix_deleted_records_v1', 'fenix_usuarios_v2', 'fenix_auth_users_v2', 'fenix_notificacoes_config_v2', 'fenix_custos_estrutura_v1', 'fenix_custos_rateio_v1', 'fenix_custos_comissoes_v1', 'fenix_custos_nota_fiscal_v1', 'fenix_custos_pagamentos_v1', 'fenix_custos_marketplace_v1', 'fenix_custos_pedido_regras_v1', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo', 'fenix_tarkett_simulacoes_v1', 'fenix_custos_variaveis_v1', 'fenix_whatsapp_templates_by_category', 'fenix_metas_config_data', 'fenix_individual_metas_map', 'fenix_user_themes_v1'],
+  'Settings': ['fenix_deleted_records_v1', 'fenix_usuarios_v2', 'fenix_auth_users_v2', 'fenix_notificacoes_config_v2', 'fenix_custos_estrutura_v1', 'fenix_custos_rateio_v1', 'fenix_custos_comissoes_v1', 'fenix_custos_nota_fiscal_v1', 'fenix_custos_pagamentos_v1', 'fenix_custos_marketplace_v1', 'fenix_custos_pedido_regras_v1', 'fenix_custos_tarkett_itens_v1', 'fenix_tarkett_produtos_catalogo', 'fenix_tarkett_simulacoes_v1', 'fenix_custos_variaveis_v1', 'fenix_whatsapp_templates_by_category', 'fenix_metas_config_data', 'fenix_individual_metas_map', 'fenix_user_themes_v1'],
   'Estoque': ['fenix_deleted_records_v1', 'fenix_estoque_items', 'fenix_estoque_categories', 'fenix_estoque_groups', 'fenix_estoque_movimentacoes'],
   'Controle de Estoque': ['fenix_deleted_records_v1', 'fenix_estoque_items', 'fenix_estoque_categories', 'fenix_estoque_groups', 'fenix_estoque_movimentacoes'],
   'Materiais': ['fenix_deleted_records_v1', 'fenix_estoque_items', 'fenix_estoque_categories', 'fenix_estoque_groups', 'fenix_estoque_movimentacoes'],
@@ -1939,6 +1964,51 @@ function mergeUserThemesForSync(remoteRaw: any, localRaw: any): Record<string, a
   return result;
 }
 
+function mergeUserNotifPrefsForSync(remoteRaw: any, localRaw: any): Record<string, any> {
+  return mergeUserThemesForSync(remoteRaw, localRaw);
+}
+
+function mirrorNotifPrefsMapToLocal(finalData: Record<string, any>): void {
+  if (typeof localStorage === 'undefined' || !finalData || typeof finalData !== 'object') return;
+  for (const [uidKey, val] of Object.entries(finalData)) {
+    if (!val || typeof val !== 'object') continue;
+    const entry = val as Record<string, any>;
+    const rawUserId = typeof entry.userId === 'string' && entry.userId.trim() ? entry.userId : uidKey;
+    const normUid = rawUserId
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9_-]/g, '_') || 'padrao';
+    try {
+      const existingRaw =
+        localStorage.getItem(`fenix_user_notif_prefs_${rawUserId}`) ||
+        localStorage.getItem(`fenix_user_notif_prefs_${normUid}`);
+      let existingParsed: any = null;
+      if (existingRaw) {
+        try {
+          existingParsed = JSON.parse(existingRaw);
+        } catch {}
+      }
+      const merged = {
+        ...entry,
+        ...(existingParsed?.customAudioGeneral && !entry.customAudioGeneral
+          ? { customAudioGeneral: existingParsed.customAudioGeneral }
+          : {}),
+        ...(existingParsed?.customAudioPerType && !entry.customAudioPerType
+          ? { customAudioPerType: existingParsed.customAudioPerType }
+          : {}),
+      };
+      const serialized = JSON.stringify(merged);
+      localStorage.setItem(`fenix_user_notif_prefs_${rawUserId}`, serialized);
+      localStorage.setItem(`fenix_user_notif_prefs_${normUid}`, serialized);
+    } catch {}
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('fenix_notif_prefs_updated'));
+  }
+}
+
 function applyMirroredLocalKeys(key: string, finalData: any): void {
   if (!key || finalData === undefined || finalData === null) return;
   try {
@@ -1955,6 +2025,8 @@ function applyMirroredLocalKeys(key: string, finalData: any): void {
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('fenix_orcamento_msg_updated'));
     } else if (key === 'fenix_user_themes_v1' && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('fenix_remote_user_themes_updated', { detail: finalData }));
+    } else if (key === 'fenix_notificacoes_config_v2' && typeof finalData === 'object') {
+      mirrorNotifPrefsMapToLocal(finalData);
     } else if (key === 'fenix_anotacoes_db' && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('fenix_anotacoes_realtime_updated', { detail: { key, data: finalData } }));
     }
@@ -2132,6 +2204,8 @@ export async function pullDataFromSupabase(
           }
         } else if (key === 'fenix_user_themes_v1') {
           finalData = mergeUserThemesForSync(parsedData, localParsed);
+        } else if (key === 'fenix_notificacoes_config_v2') {
+          finalData = mergeUserNotifPrefsForSync(parsedData, localParsed);
         } else if (Array.isArray(parsedData)) {
           const pendingUpsertItems: any[] = [
             ...keyIdbPending.filter((r) => r.op === 'upsert' && r.item).map((r) => r.item),
@@ -3973,6 +4047,8 @@ export async function syncPendingOfflineRecordsToSupabase(
           finalPayload = mergeDeletionTombstoneMaps(remoteRes.data, localParsed || recs[0]?.item);
         } else if (collectionKey === 'fenix_user_themes_v1') {
           finalPayload = mergeUserThemesForSync(remoteRes.data, localParsed || recs[0]?.item);
+        } else if (collectionKey === 'fenix_notificacoes_config_v2') {
+          finalPayload = mergeUserNotifPrefsForSync(remoteRes.data, localParsed || recs[0]?.item);
         } else {
           const collectionRec = recs.find((r) => r.op === 'collection');
           const upsertRecs = recs.filter((r) => r.op === 'upsert' && r.item);
@@ -4240,6 +4316,8 @@ export async function pullAndMergeFromSupabaseSafe(): Promise<{
           mergedData = mergeDeletionTombstoneMaps(remData, localParsed);
         } else if (key === 'fenix_user_themes_v1') {
           mergedData = mergeUserThemesForSync(remData, localParsed);
+        } else if (key === 'fenix_notificacoes_config_v2') {
+          mergedData = mergeUserNotifPrefsForSync(remData, localParsed);
         } else if (key === 'fenix_anotacoes_db') {
           mergedData = mergeAnotacoesForSync(remData, localParsed, pendingRecs);
         } else if (key === 'fenix_promocoes_ativas_db') {

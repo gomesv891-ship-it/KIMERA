@@ -1,4 +1,12 @@
 import { ClientActivity, ClientRecord } from '../types';
+import {
+  getLocalCollectionSafe,
+  pullCollectionFromSupabase,
+  saveItemToSupabase,
+  setLocalCollectionSafe,
+} from './supabaseClient';
+
+export const ACTIVITIES_STORAGE_KEY = 'fenix_activities_db';
 
 /**
  * Loads all real activities for a specific client from persistent storage.
@@ -10,11 +18,16 @@ export function getClientActivities(
 ): ClientActivity[] {
   let list: ClientActivity[] = [];
   try {
-    const raw = localStorage.getItem('fenix_activities_db');
-    if (raw) {
-      const parsed: ClientActivity[] = JSON.parse(raw);
-      list = parsed.filter((item) => item.clientId === clientId);
-    }
+    const parsed = getLocalCollectionSafe<ClientActivity>(ACTIVITIES_STORAGE_KEY, []);
+    const seen = new Set<string>();
+    list = parsed.filter((item) => {
+      if (!item || item.clientId !== clientId) return false;
+      if (item.id) {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+      }
+      return true;
+    });
   } catch {
     list = [];
   }
@@ -55,7 +68,20 @@ export function getClientActivities(
 }
 
 /**
- * Adds a new activity record to the persistent database linked to a specific client.
+ * Sincroniza o histórico de atividades com o Supabase para garantir visualização entre computadores.
+ */
+export async function syncClientActivitiesFromSupabase(): Promise<ClientActivity[]> {
+  try {
+    await pullCollectionFromSupabase(ACTIVITIES_STORAGE_KEY);
+  } catch {
+    // fallback para cache local já hidratado
+  }
+  return getLocalCollectionSafe<ClientActivity>(ACTIVITIES_STORAGE_KEY, []);
+}
+
+/**
+ * Adds a new activity record to the persistent database linked to a specific client
+ * and syncs it asynchronously to Supabase.
  */
 export function addClientActivity(
   activity: Omit<ClientActivity, 'id' | 'timestamp'> & { timestamp?: number }
@@ -66,23 +92,36 @@ export function addClientActivity(
     activity.time ||
     now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+  const resolvedUser =
+    activity.userName ||
+    (typeof localStorage !== 'undefined'
+      ? localStorage.getItem('fenix_active_user_name') || localStorage.getItem('fenix_saved_username')
+      : null) ||
+    'Usuário Fênix';
+
   const newActivity: ClientActivity = {
     ...activity,
+    userName: resolvedUser,
     id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     time,
     timestamp,
   };
 
   try {
-    const raw = localStorage.getItem('fenix_activities_db');
-    const currentList: ClientActivity[] = raw ? JSON.parse(raw) : [];
-    currentList.unshift(newActivity);
-    localStorage.setItem('fenix_activities_db', JSON.stringify(currentList));
-    window.dispatchEvent(
-      new CustomEvent('fenix_activities_updated', {
-        detail: { clientId: activity.clientId },
-      })
-    );
+    const currentList = getLocalCollectionSafe<ClientActivity>(ACTIVITIES_STORAGE_KEY, []);
+    const nextList = [newActivity, ...currentList.filter((a) => a && a.id !== newActivity.id)];
+    setLocalCollectionSafe(ACTIVITIES_STORAGE_KEY, nextList);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('fenix_activities_updated', {
+          detail: { clientId: activity.clientId },
+        })
+      );
+    }
+
+    saveItemToSupabase(ACTIVITIES_STORAGE_KEY, newActivity, 'id', resolvedUser).catch((err) => {
+      console.warn('Aviso ao sincronizar atividade no Supabase:', err);
+    });
   } catch (err) {
     console.error('Error saving activity:', err);
   }

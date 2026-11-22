@@ -1,8 +1,15 @@
 import {
+  clearDeletionTombstones,
+  dispatchCollectionEvents,
   enqueueCollectionWrite,
   formatSupabaseErrorMessage,
+  getDeletedIdsForCollection,
   getLocalRawSafe,
   getSupabaseClient,
+  isItemTombstoned,
+  pullCollectionFromSupabase,
+  recordDeletionTombstones,
+  recordSelfSave,
   setLocalCollectionSafe,
   withAbortableTimeout,
 } from './supabaseClient';
@@ -20,6 +27,11 @@ import {
 
 export const FLOORPLAN_PROJECTS_STORAGE_KEY = 'fenix_calculadora_plantas_v1';
 export const FLOORPLAN_ACTIVE_DRAFT_KEY = 'fenix_calculadora_plantas_active_draft_v1';
+export const FLOORPLAN_IMAGE_KEY_PREFIX = 'fenix_planta_img_';
+
+export function getFloorplanImageStorageKey(projectId: string): string {
+  return `${FLOORPLAN_IMAGE_KEY_PREFIX}${String(projectId || '').trim()}`.slice(0, 120);
+}
 
 export interface SavedFloorplanProject {
   id: string;
@@ -58,7 +70,12 @@ export interface FloorplanActiveDraft {
 
 function normalizeIrregularData(raw: any): FloorplanRoom['irregularData'] {
   if (!raw || typeof raw !== 'object') return undefined;
-  const method = raw.method === 'diagonals' ? 'diagonals' : 'angles';
+  const method =
+    raw.method === 'diagonals'
+      ? 'diagonals'
+      : raw.method === 'floorplan_trace'
+        ? 'floorplan_trace'
+        : 'angles';
   const segments = Array.isArray(raw.segments)
     ? raw.segments.map((s: any, idx: number) => ({
         id: String(s?.id || `seg_norm_${idx}`),
@@ -93,7 +110,56 @@ function normalizeIrregularData(raw: any): FloorplanRoom['irregularData'] {
       }))
     : [];
 
-  return { method, segments, diagonals };
+  let floorplanTrace: NonNullable<FloorplanRoom['irregularData']>['floorplanTrace'] = undefined;
+  if (raw.floorplanTrace && typeof raw.floorplanTrace === 'object') {
+    const rawTrace = raw.floorplanTrace;
+    const points = Array.isArray(rawTrace.points)
+      ? rawTrace.points
+          .filter(
+            (p: any) =>
+              p &&
+              typeof p.x === 'number' &&
+              Number.isFinite(p.x) &&
+              typeof p.y === 'number' &&
+              Number.isFinite(p.y)
+          )
+          .map((p: any, idx: number) => ({
+            id: String(p.id || `pt_norm_${idx}`),
+            x: Math.max(0, Math.min(1, p.x)),
+            y: Math.max(0, Math.min(1, p.y)),
+          }))
+      : [];
+
+    floorplanTrace = {
+      points,
+      imageWidth:
+        typeof rawTrace.imageWidth === 'number' && rawTrace.imageWidth > 0
+          ? rawTrace.imageWidth
+          : 1000,
+      imageHeight:
+        typeof rawTrace.imageHeight === 'number' && rawTrace.imageHeight > 0
+          ? rawTrace.imageHeight
+          : 1000,
+      isClosed: Boolean(rawTrace.isClosed),
+      referenceEdgeIndex:
+        typeof rawTrace.referenceEdgeIndex === 'number' && rawTrace.referenceEdgeIndex >= 0
+          ? rawTrace.referenceEdgeIndex
+          : 0,
+      referenceLengthMeters:
+        typeof rawTrace.referenceLengthMeters === 'number' &&
+        Number.isFinite(rawTrace.referenceLengthMeters) &&
+        rawTrace.referenceLengthMeters > 0
+          ? rawTrace.referenceLengthMeters
+          : null,
+    };
+  }
+
+  return {
+    method,
+    segments,
+    diagonals,
+    ...(floorplanTrace ? { floorplanTrace } : {}),
+  };
 }
 
 function normalizeRoomRecord(raw: any, index: number): FloorplanRoom {
@@ -219,7 +285,8 @@ function deduplicateProjects(list: any[]): SavedFloorplanProject[] {
 }
 
 /**
- * Compacta uma miniatura/preview da planta para persistência segura no Supabase.
+ * Compacta uma miniatura/preview da planta para persistência segura no Supabase,
+ * com degradação progressiva para nunca apagar a imagem em branco.
  */
 export async function compressPreviewForStorage(
   dataUrl: string,
@@ -232,27 +299,96 @@ export async function compressPreviewForStorage(
   if (dataUrl.length <= 160_000) {
     return dataUrl;
   }
+  if (typeof document === 'undefined' || typeof Image === 'undefined') {
+    return dataUrl.length <= 320_000 ? dataUrl : '';
+  }
 
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
-        const scale = Math.min(1, maxDimension / Math.max(img.width || 1, img.height || 1));
-        const targetW = Math.max(1, Math.round((img.width || maxDimension) * scale));
-        const targetH = Math.max(1, Math.round((img.height || maxDimension) * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = targetW;
-        canvas.height = targetH;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve('');
-          return;
+        const steps: Array<[number, number]> = [
+          [maxDimension, quality],
+          [800, 0.65],
+          [640, 0.56],
+          [480, 0.48],
+          [360, 0.42],
+        ];
+        let smallest = '';
+        for (const [dim, q] of steps) {
+          const scale = Math.min(1, dim / Math.max(img.width || 1, img.height || 1));
+          const targetW = Math.max(1, Math.round((img.width || dim) * scale));
+          const targetH = Math.max(1, Math.round((img.height || dim) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(dataUrl.length <= 320_000 ? dataUrl : '');
+            return;
+          }
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          const candidate = canvas.toDataURL('image/jpeg', q);
+          if (!smallest || candidate.length < smallest.length) {
+            smallest = candidate;
+          }
+          if (candidate.length <= 320_000) {
+            resolve(candidate);
+            return;
+          }
         }
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, targetW, targetH);
-        ctx.drawImage(img, 0, 0, targetW, targetH);
-        const compressed = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressed.length <= 320_000 ? compressed : '');
+        resolve(smallest);
+      } catch {
+        resolve(dataUrl.length <= 320_000 ? dataUrl : '');
+      }
+    };
+    img.onerror = () => resolve(dataUrl.length <= 320_000 ? dataUrl : '');
+    img.src = dataUrl;
+  });
+}
+
+async function prepareFullFloorplanAssetForStorage(dataUrl: string): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+    return '';
+  }
+  if (dataUrl.length <= 2_200_000) {
+    return dataUrl;
+  }
+  if (typeof document === 'undefined' || typeof Image === 'undefined') {
+    return dataUrl.slice(0, 0);
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        for (const [dim, q] of [
+          [2000, 0.84],
+          [1600, 0.78],
+          [1280, 0.7],
+        ] as Array<[number, number]>) {
+          const scale = Math.min(1, dim / Math.max(img.width || 1, img.height || 1));
+          const targetW = Math.max(1, Math.round((img.width || dim) * scale));
+          const targetH = Math.max(1, Math.round((img.height || dim) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve('');
+            return;
+          }
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          const candidate = canvas.toDataURL('image/jpeg', q);
+          if (candidate.length <= 2_200_000 || dim === 1280) {
+            resolve(candidate);
+            return;
+          }
+        }
+        resolve('');
       } catch {
         resolve('');
       }
@@ -260,6 +396,41 @@ export async function compressPreviewForStorage(
     img.onerror = () => resolve('');
     img.src = dataUrl;
   });
+}
+
+export async function loadFloorplanProjectFullImage(
+  project: Pick<SavedFloorplanProject, 'id' | 'previewDataUrl'>
+): Promise<string> {
+  const fallback = String(project?.previewDataUrl || '');
+  if (!project?.id || isEmergencyOfflineMode()) {
+    return fallback;
+  }
+  const client = getSupabaseClient();
+  if (!client) return fallback;
+
+  try {
+    const imgKey = getFloorplanImageStorageKey(project.id);
+    const { data: row, error } = await withAbortableTimeout<any>(
+      (signal) =>
+        client
+          .from('fenix_kv_store')
+          .select('data')
+          .eq('key', imgKey)
+          .abortSignal(signal)
+          .maybeSingle(),
+      10000,
+      'Tempo limite ao carregar imagem da planta no Supabase.'
+    );
+    if (error || !row?.data) return fallback;
+    const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    if (parsed?.deleted) return fallback;
+    if (typeof parsed?.previewDataUrl === 'string' && parsed.previewDataUrl.startsWith('data:image/')) {
+      return parsed.previewDataUrl;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function saveActiveFloorplanDraft(draft: FloorplanActiveDraft): void {
@@ -357,6 +528,8 @@ export async function loadFloorplanProjectsFromSupabase(): Promise<SavedFloorpla
   }
 
   try {
+    await pullCollectionFromSupabase('fenix_deleted_records_v1').catch(() => false);
+
     const { data: row, error } = await withAbortableTimeout<any>(
       (signal) =>
         client
@@ -374,8 +547,11 @@ export async function loadFloorplanProjectsFromSupabase(): Promise<SavedFloorpla
       return getStoredFloorplanProjects();
     }
 
+    const deletedMap = getDeletedIdsForCollection(FLOORPLAN_PROJECTS_STORAGE_KEY);
+    const hasRemoteRow = Boolean(row && row.data !== undefined && row.data !== null);
+
     let remoteList: SavedFloorplanProject[] = [];
-    if (row && row.data !== undefined) {
+    if (hasRemoteRow) {
       let rData = row.data;
       if (typeof rData === 'string') {
         try {
@@ -385,19 +561,25 @@ export async function loadFloorplanProjectsFromSupabase(): Promise<SavedFloorpla
         }
       }
       if (Array.isArray(rData)) {
-        remoteList = deduplicateProjects(rData);
+        remoteList = deduplicateProjects(rData).filter(
+          (p) => !isItemTombstoned(FLOORPLAN_PROJECTS_STORAGE_KEY, p, 'id', deletedMap)
+        );
       }
     }
 
-    const localList = getStoredFloorplanProjects();
+    const localList = getStoredFloorplanProjects().filter(
+      (p) => !isItemTombstoned(FLOORPLAN_PROJECTS_STORAGE_KEY, p, 'id', deletedMap)
+    );
 
     if (remoteList.length > 0 || localList.length > 0) {
       const merged = deduplicateProjects([...localList, ...remoteList]);
       memoryProjectsCache = merged;
       setLocalCollectionSafe(FLOORPLAN_PROJECTS_STORAGE_KEY, merged);
 
-      if (remoteList.length === 0 && localList.length > 0) {
+      if (remoteList.length === 0 && localList.length > 0 && !hasRemoteRow) {
         try {
+          const nowIso = new Date().toISOString();
+          recordSelfSave(FLOORPLAN_PROJECTS_STORAGE_KEY, nowIso);
           await withAbortableTimeout<any>(
             (signal) =>
               client
@@ -406,7 +588,7 @@ export async function loadFloorplanProjectsFromSupabase(): Promise<SavedFloorpla
                   {
                     key: FLOORPLAN_PROJECTS_STORAGE_KEY,
                     data: merged,
-                    updated_at: new Date().toISOString(),
+                    updated_at: nowIso,
                     updated_by: 'Sistema Fênix',
                   },
                   { onConflict: 'key' }
@@ -424,6 +606,8 @@ export async function loadFloorplanProjectsFromSupabase(): Promise<SavedFloorpla
       return [...merged];
     }
 
+    memoryProjectsCache = [];
+    setLocalCollectionSafe(FLOORPLAN_PROJECTS_STORAGE_KEY, []);
     return [];
   } catch (err) {
     console.warn('Falha ao consultar histórico de plantas no Supabase:', err);
@@ -447,6 +631,10 @@ export async function saveFloorplanProject(
     'Usuário Fênix';
 
   const compactPreview = await compressPreviewForStorage(projectInput.previewDataUrl);
+  const fullPreview =
+    projectInput.previewDataUrl && projectInput.previewDataUrl.startsWith('data:image/')
+      ? await prepareFullFloorplanAssetForStorage(projectInput.previewDataUrl)
+      : '';
 
   return enqueueCollectionWrite(FLOORPLAN_PROJECTS_STORAGE_KEY, async () => {
     let remoteList: SavedFloorplanProject[] = [];
@@ -472,8 +660,11 @@ export async function saveFloorplanProject(
       }
     }
 
-    const baseList = deduplicateProjects([...getStoredFloorplanProjects(), ...remoteList]);
+    const deletedMap = getDeletedIdsForCollection(FLOORPLAN_PROJECTS_STORAGE_KEY);
     const targetId = projectInput.id?.trim();
+    const baseList = deduplicateProjects([...getStoredFloorplanProjects(), ...remoteList]).filter(
+      (p) => (targetId && p.id === targetId) || !isItemTombstoned(FLOORPLAN_PROJECTS_STORAGE_KEY, p, 'id', deletedMap)
+    );
     const existing = targetId ? baseList.find((p) => p.id === targetId) : undefined;
 
     const savedProject: SavedFloorplanProject = {
@@ -506,6 +697,7 @@ export async function saveFloorplanProject(
       ...baseList.filter((p) => p.id !== savedProject.id),
     ]).slice(0, 60);
 
+    clearDeletionTombstones(FLOORPLAN_PROJECTS_STORAGE_KEY, [savedProject.id]);
     memoryProjectsCache = nextList;
     setLocalCollectionSafe(FLOORPLAN_PROJECTS_STORAGE_KEY, nextList);
 
@@ -519,10 +711,12 @@ export async function saveFloorplanProject(
         user,
         summaryLabel: savedProject.name,
       });
+      dispatchCollectionEvents(FLOORPLAN_PROJECTS_STORAGE_KEY);
       return savedProject;
     }
 
     try {
+      recordSelfSave(FLOORPLAN_PROJECTS_STORAGE_KEY, now);
       const { error } = await withAbortableTimeout<any>(
         (signal) =>
           client
@@ -543,7 +737,38 @@ export async function saveFloorplanProject(
         'Tempo limite ao salvar planta no Supabase.'
       );
       if (error) throw error;
+
+      const assetToPersist = fullPreview || compactPreview;
+      if (assetToPersist && assetToPersist.length > compactPreview.length) {
+        const imgKey = getFloorplanImageStorageKey(savedProject.id);
+        recordSelfSave(imgKey, now);
+        await withAbortableTimeout<any>(
+          (signal) =>
+            client
+              .from('fenix_kv_store')
+              .upsert(
+                {
+                  key: imgKey,
+                  data: {
+                    projectId: savedProject.id,
+                    previewDataUrl: assetToPersist,
+                    updatedAt: now,
+                  },
+                  updated_at: now,
+                  updated_by: user,
+                },
+                { onConflict: 'key' }
+              )
+              .select('updated_at')
+              .abortSignal(signal)
+              .maybeSingle(),
+          18000,
+          'Tempo limite ao salvar imagem da planta no Supabase.'
+        ).catch(() => {});
+      }
+
       removePendingSyncRecord(FLOORPLAN_PROJECTS_STORAGE_KEY, savedProject.id);
+      dispatchCollectionEvents(FLOORPLAN_PROJECTS_STORAGE_KEY);
     } catch (err: any) {
       markRecordPendingSync({
         collectionKey: FLOORPLAN_PROJECTS_STORAGE_KEY,
@@ -579,7 +804,36 @@ export async function deleteFloorplanProject(id: string): Promise<boolean> {
     'Usuário Fênix';
 
   return enqueueCollectionWrite(FLOORPLAN_PROJECTS_STORAGE_KEY, async () => {
-    const filtered = getStoredFloorplanProjects().filter((p) => p.id !== cleanId);
+    let baseList = getStoredFloorplanProjects();
+    if (!offlineMode && client) {
+      try {
+        const { data: row } = await withAbortableTimeout<any>(
+          (signal) =>
+            client
+              .from('fenix_kv_store')
+              .select('data')
+              .eq('key', FLOORPLAN_PROJECTS_STORAGE_KEY)
+              .abortSignal(signal)
+              .maybeSingle(),
+          10000,
+          'Tempo limite ao verificar plantas no Supabase.'
+        );
+        if (row?.data) {
+          const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          if (Array.isArray(parsed)) {
+            baseList = deduplicateProjects([...baseList, ...parsed]);
+          }
+        }
+      } catch {
+        // segue com base local
+      }
+    }
+
+    await recordDeletionTombstones(FLOORPLAN_PROJECTS_STORAGE_KEY, [cleanId], user);
+    const deletedMap = getDeletedIdsForCollection(FLOORPLAN_PROJECTS_STORAGE_KEY);
+    const filtered = baseList.filter(
+      (p) => p.id !== cleanId && !isItemTombstoned(FLOORPLAN_PROJECTS_STORAGE_KEY, p, 'id', deletedMap)
+    );
     memoryProjectsCache = filtered;
     setLocalCollectionSafe(FLOORPLAN_PROJECTS_STORAGE_KEY, filtered);
 
@@ -592,9 +846,11 @@ export async function deleteFloorplanProject(id: string): Promise<boolean> {
         user,
         summaryLabel: 'Planta removida',
       });
+      dispatchCollectionEvents(FLOORPLAN_PROJECTS_STORAGE_KEY);
       return true;
     }
 
+    recordSelfSave(FLOORPLAN_PROJECTS_STORAGE_KEY, now);
     const { error } = await withAbortableTimeout<any>(
       (signal) =>
         client
@@ -621,7 +877,30 @@ export async function deleteFloorplanProject(id: string): Promise<boolean> {
       );
     }
 
+    const imgKey = getFloorplanImageStorageKey(cleanId);
+    recordSelfSave(imgKey, now);
+    await withAbortableTimeout<any>(
+      (signal) =>
+        client
+          .from('fenix_kv_store')
+          .upsert(
+            {
+              key: imgKey,
+              data: { projectId: cleanId, deleted: true, updatedAt: now },
+              updated_at: now,
+              updated_by: user,
+            },
+            { onConflict: 'key' }
+          )
+          .select('updated_at')
+          .abortSignal(signal)
+          .maybeSingle(),
+      10000,
+      'Tempo limite ao marcar imagem removida.'
+    ).catch(() => {});
+
     removePendingSyncRecord(FLOORPLAN_PROJECTS_STORAGE_KEY, cleanId);
+    dispatchCollectionEvents(FLOORPLAN_PROJECTS_STORAGE_KEY);
     return true;
   });
 }

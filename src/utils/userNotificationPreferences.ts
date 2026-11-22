@@ -5,7 +5,14 @@
  */
 
 import { NotificationSoundType, playNotificationSound } from './soundAlerts';
-import { getSupabaseClient } from './supabaseClient';
+import {
+  enqueueCollectionWrite,
+  getLocalRawSafe,
+  getSupabaseClient,
+  recordSelfSave,
+  setLocalCollectionSafe,
+  withAbortableTimeout,
+} from './supabaseClient';
 import { isEmergencyOfflineMode } from './indexedDbOfflineStore';
 
 export type NotificationCategoryType =
@@ -201,10 +208,347 @@ export const DEFAULT_NOTIF_PREFS: Omit<UserNotificationPreferences, 'userId'> = 
   },
 };
 
+export const NOTIFICACOES_CONFIG_SUPABASE_KEY = 'fenix_notificacoes_config_v2';
+export const NOTIF_AUDIO_SUPABASE_PREFIX = 'fenix_notif_audio_';
+
+export function getNotifAudioSupabaseKey(userId: string): string {
+  return `${NOTIF_AUDIO_SUPABASE_PREFIX}${normalizeUserId(userId)}`;
+}
+
 const STORAGE_PREFIX = 'fenix_user_notif_prefs_';
 const CUSTOM_AUDIO_PREFIX = 'fenix_custom_audio_';
 const CUSTOM_AUDIO_GENERAL_PREFIX = 'fenix_custom_audio_general_';
 const DEDUPLICATION_PREFIX = 'fenix_meta_notif_fired_';
+
+type StoredNotifPrefsEntry = UserNotificationPreferences & { updatedAt?: string };
+
+function readNotifConfigMapLocal(): Record<string, StoredNotifPrefsEntry> {
+  try {
+    const raw = getLocalRawSafe(NOTIFICACOES_CONFIG_SUPABASE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {}
+  return {};
+}
+
+function normalizePrefsObject(userId: string, parsed: any): UserNotificationPreferences {
+  return {
+    userId,
+    enabled: parsed?.enabled !== undefined ? parsed.enabled : DEFAULT_NOTIF_PREFS.enabled,
+    soundType: parsed?.soundType || DEFAULT_NOTIF_PREFS.soundType,
+    soundsPerType: {
+      ...DEFAULT_SOUNDS_PER_TYPE,
+      ...(parsed?.soundsPerType || {}),
+    },
+    customAudioGeneral: parsed?.customAudioGeneral || undefined,
+    customAudioPerType: parsed?.customAudioPerType || undefined,
+    volumePercent:
+      typeof parsed?.volumePercent === 'number'
+        ? parsed.volumePercent
+        : DEFAULT_NOTIF_PREFS.volumePercent,
+    volumesPerType: {
+      ...DEFAULT_NOTIF_PREFS.volumesPerType,
+      ...(parsed?.volumesPerType || {}),
+    },
+    scheduleEnabled:
+      parsed?.scheduleEnabled !== undefined
+        ? parsed.scheduleEnabled
+        : DEFAULT_NOTIF_PREFS.scheduleEnabled,
+    scheduleStartTime: parsed?.scheduleStartTime || DEFAULT_NOTIF_PREFS.scheduleStartTime,
+    scheduleEndTime: parsed?.scheduleEndTime || DEFAULT_NOTIF_PREFS.scheduleEndTime,
+    externalAlerts: {
+      ...DEFAULT_NOTIF_PREFS.externalAlerts,
+      ...(parsed?.externalAlerts || {}),
+    },
+    alerts: {
+      ...DEFAULT_NOTIF_PREFS.alerts,
+      ...(parsed?.alerts || {}),
+    },
+    metaAlerts: {
+      diaria: {
+        ...DEFAULT_NOTIF_PREFS.metaAlerts.diaria,
+        ...(parsed?.metaAlerts?.diaria || {}),
+      },
+      semanal: {
+        ...DEFAULT_NOTIF_PREFS.metaAlerts.semanal,
+        ...(parsed?.metaAlerts?.semanal || {}),
+      },
+      mensal: {
+        ...DEFAULT_NOTIF_PREFS.metaAlerts.mensal,
+        ...(parsed?.metaAlerts?.mensal || {}),
+      },
+    },
+  };
+}
+
+function buildCompactNotifPrefsForRemote(
+  prefs: UserNotificationPreferences,
+  updatedAt: string
+): StoredNotifPrefsEntry {
+  // Remove dataUrls pesados do mapa leve de preferências; os áudios completos são sincronizados em fenix_notif_audio_<uid>
+  const { customAudioGeneral: _gen, customAudioPerType: _cat, ...rest } = prefs;
+  return {
+    ...rest,
+    userId: prefs.userId,
+    updatedAt,
+  };
+}
+
+function mirrorUserPrefsToLocal(uid: string, rawUserId: string, prefs: StoredNotifPrefsEntry): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const existingRaw =
+      localStorage.getItem(`${STORAGE_PREFIX}${rawUserId}`) ||
+      localStorage.getItem(`${STORAGE_PREFIX}${uid}`);
+    let existingParsed: any = null;
+    if (existingRaw) {
+      try {
+        existingParsed = JSON.parse(existingRaw);
+      } catch {}
+    }
+    const merged: StoredNotifPrefsEntry = {
+      ...normalizePrefsObject(rawUserId || prefs.userId || uid, prefs),
+      // Preserva áudios em cache local se o mapa remoto veio sem eles
+      ...(existingParsed?.customAudioGeneral && !prefs.customAudioGeneral
+        ? { customAudioGeneral: existingParsed.customAudioGeneral }
+        : {}),
+      ...(existingParsed?.customAudioPerType && !prefs.customAudioPerType
+        ? { customAudioPerType: existingParsed.customAudioPerType }
+        : {}),
+      updatedAt: prefs.updatedAt,
+    };
+    const serialized = JSON.stringify(merged);
+    if (rawUserId) localStorage.setItem(`${STORAGE_PREFIX}${rawUserId}`, serialized);
+    localStorage.setItem(`${STORAGE_PREFIX}${uid}`, serialized);
+  } catch {}
+}
+
+export function hydrateNotifPrefsMapFromRemote(remoteMap: any): void {
+  if (!remoteMap || typeof remoteMap !== 'object' || Array.isArray(remoteMap)) return;
+  for (const [uidKey, val] of Object.entries(remoteMap)) {
+    if (!val || typeof val !== 'object') continue;
+    const entry = val as StoredNotifPrefsEntry;
+    const uid = normalizeUserId(entry.userId || uidKey);
+    mirrorUserPrefsToLocal(uid, entry.userId || uidKey, entry);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('fenix_notif_prefs_updated'));
+  }
+}
+
+async function syncUserCustomAudiosToSupabase(userId: string): Promise<void> {
+  if (typeof window === 'undefined' || isEmergencyOfflineMode()) return;
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  const uid = normalizeUserId(userId);
+  const remoteKey = getNotifAudioSupabaseKey(userId);
+
+  const general = getCustomAudioGeneral(userId);
+  const categories: Partial<Record<NotificationCategoryType, CustomAudioSound>> = {};
+  const cats: NotificationCategoryType[] = [
+    'tarefas',
+    'boletos',
+    'followup',
+    'metas',
+    'estoque',
+    'tabelas',
+    'notas',
+    'pendencias',
+    'posvendas',
+    'outras',
+  ];
+  for (const c of cats) {
+    try {
+      const raw = localStorage.getItem(`${CUSTOM_AUDIO_PREFIX}${uid}_${c}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.dataUrl) categories[c] = parsed;
+      }
+    } catch {}
+  }
+
+  const nowIso = new Date().toISOString();
+  const payload = {
+    userId,
+    uid,
+    general: general || null,
+    categories,
+    updatedAt: nowIso,
+  };
+
+  await enqueueCollectionWrite(remoteKey, async () => {
+    try {
+      recordSelfSave(remoteKey, nowIso);
+      const { error } = await withAbortableTimeout<any>(
+        (signal) =>
+          supabase
+            .from('fenix_kv_store')
+            .upsert(
+              {
+                key: remoteKey,
+                data: payload,
+                updated_at: nowIso,
+                updated_by: userId || 'Usuário Fênix',
+              },
+              { onConflict: 'key' }
+            )
+            .select('updated_at')
+            .abortSignal(signal)
+            .maybeSingle(),
+        25000,
+        'Tempo limite ao salvar áudio personalizado no Supabase.'
+      );
+      if (error) {
+        console.warn('Aviso ao sincronizar áudio personalizado no Supabase:', error);
+      }
+    } catch (err) {
+      console.warn('Aviso ao sincronizar áudio personalizado no Supabase:', err);
+    }
+  });
+}
+
+export async function loadUserNotificationPreferencesFromSupabase(
+  userId: string
+): Promise<UserNotificationPreferences> {
+  const localPrefs = getUserNotificationPreferences(userId);
+  if (typeof window === 'undefined' || !userId || isEmergencyOfflineMode()) {
+    return localPrefs;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return localPrefs;
+
+  const uid = normalizeUserId(userId);
+  const audioKey = getNotifAudioSupabaseKey(userId);
+
+  try {
+    const [prefsRes, audioRes] = await Promise.all([
+      withAbortableTimeout<any>(
+        (signal) =>
+          supabase
+            .from('fenix_kv_store')
+            .select('data')
+            .eq('key', NOTIFICACOES_CONFIG_SUPABASE_KEY)
+            .abortSignal(signal)
+            .maybeSingle(),
+        12000,
+        'Tempo limite ao carregar preferências de notificação.'
+      ).catch(() => null),
+      withAbortableTimeout<any>(
+        (signal) =>
+          supabase
+            .from('fenix_kv_store')
+            .select('data')
+            .eq('key', audioKey)
+            .abortSignal(signal)
+            .maybeSingle(),
+        15000,
+        'Tempo limite ao carregar áudios personalizados.'
+      ).catch(() => null),
+    ]);
+
+    let resolvedEntryFromV2 = false;
+    if (prefsRes?.data?.data) {
+      let parsedMap = prefsRes.data.data;
+      if (typeof parsedMap === 'string') {
+        try {
+          parsedMap = JSON.parse(parsedMap);
+        } catch {}
+      }
+      if (parsedMap && typeof parsedMap === 'object' && !Array.isArray(parsedMap)) {
+        const localMap = readNotifConfigMapLocal();
+        const mergedMap: Record<string, StoredNotifPrefsEntry> = { ...parsedMap };
+        for (const [k, v] of Object.entries(localMap)) {
+          const cur = mergedMap[k];
+          const locTs = Date.parse(v?.updatedAt || '') || 0;
+          const remTs = Date.parse(cur?.updatedAt || '') || 0;
+          if (!cur || locTs > remTs) {
+            mergedMap[k] = v;
+          }
+        }
+        if (mergedMap[uid] || mergedMap[userId]) {
+          resolvedEntryFromV2 = true;
+        }
+        setLocalCollectionSafe(NOTIFICACOES_CONFIG_SUPABASE_KEY, mergedMap);
+        hydrateNotifPrefsMapFromRemote(mergedMap);
+      }
+    }
+
+    if (!resolvedEntryFromV2) {
+      const legacyRes = await withAbortableTimeout<any>(
+        (signal) =>
+          supabase
+            .from('fenix_kv_store')
+            .select('data')
+            .eq('key', `fenix_notif_prefs_${userId}`)
+            .abortSignal(signal)
+            .maybeSingle(),
+        8000,
+        'Tempo limite ao verificar preferências legadas.'
+      ).catch(() => null);
+      if (legacyRes?.data?.data && typeof legacyRes.data.data === 'object') {
+        mirrorUserPrefsToLocal(uid, userId, legacyRes.data.data as StoredNotifPrefsEntry);
+        window.dispatchEvent(new CustomEvent('fenix_notif_prefs_updated'));
+      }
+    }
+
+    if (audioRes?.data?.data) {
+      let audioPayload = audioRes.data.data;
+      if (typeof audioPayload === 'string') {
+        try {
+          audioPayload = JSON.parse(audioPayload);
+        } catch {}
+      }
+      if (audioPayload && typeof audioPayload === 'object') {
+        try {
+          if (audioPayload.general && audioPayload.general.dataUrl) {
+            localStorage.setItem(
+              `${CUSTOM_AUDIO_GENERAL_PREFIX}${uid}`,
+              JSON.stringify(audioPayload.general)
+            );
+          } else if (audioPayload.general === null) {
+            localStorage.removeItem(`${CUSTOM_AUDIO_GENERAL_PREFIX}${uid}`);
+          }
+
+          if (audioPayload.categories && typeof audioPayload.categories === 'object') {
+            const cats: NotificationCategoryType[] = [
+              'tarefas',
+              'boletos',
+              'followup',
+              'metas',
+              'estoque',
+              'tabelas',
+              'notas',
+              'pendencias',
+              'posvendas',
+              'outras',
+            ];
+            for (const c of cats) {
+              const item = audioPayload.categories[c];
+              const k = `${CUSTOM_AUDIO_PREFIX}${uid}_${c}`;
+              if (item && item.dataUrl) {
+                localStorage.setItem(k, JSON.stringify(item));
+              } else if (audioPayload.categories && !(c in audioPayload.categories)) {
+                localStorage.removeItem(k);
+              }
+            }
+          }
+          window.dispatchEvent(new CustomEvent('fenix_custom_audio_updated'));
+        } catch (err) {
+          console.warn('Aviso ao hidratar áudios personalizados localmente:', err);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso ao carregar preferências de notificação do Supabase:', err);
+  }
+
+  return getUserNotificationPreferences(userId);
+}
 
 /**
  * Retorna se o momento atual está dentro do horário de notificações configurado.
@@ -357,6 +701,7 @@ export function saveCustomAudioGeneral(userId: string, audio: CustomAudioSound):
   try {
     localStorage.setItem(`${CUSTOM_AUDIO_GENERAL_PREFIX}${uid}`, JSON.stringify(audio));
     window.dispatchEvent(new CustomEvent('fenix_custom_audio_updated'));
+    syncUserCustomAudiosToSupabase(userId).catch(() => {});
   } catch (err) {
     console.error('Erro ao salvar áudio padrão do usuário:', err);
   }
@@ -371,6 +716,7 @@ export function removeCustomAudioGeneral(userId: string): void {
   try {
     localStorage.removeItem(`${CUSTOM_AUDIO_GENERAL_PREFIX}${uid}`);
     window.dispatchEvent(new CustomEvent('fenix_custom_audio_updated'));
+    syncUserCustomAudiosToSupabase(userId).catch(() => {});
   } catch (err) {
     console.error('Erro ao remover áudio padrão do usuário:', err);
   }
@@ -515,6 +861,7 @@ export function saveCustomAudioForCategory(
         detail: { userId, normalizedUserId: uid, category, customAudio },
       })
     );
+    syncUserCustomAudiosToSupabase(userId).catch(() => {});
   } catch (err) {
     console.error('Erro ao salvar áudio personalizado:', err);
   }
@@ -553,6 +900,7 @@ export function removeCustomAudioForCategory(
         detail: { userId, normalizedUserId: uid, category, customAudio: null },
       })
     );
+    syncUserCustomAudiosToSupabase(userId).catch(() => {});
   } catch (err) {
     console.error('Erro ao remover áudio personalizado:', err);
   }
@@ -596,51 +944,20 @@ export function getUserNotificationPreferences(userId: string): UserNotification
     return { userId: userId || 'default', ...DEFAULT_NOTIF_PREFS };
   }
 
+  const uid = normalizeUserId(userId);
   try {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}${userId}`);
+    const raw =
+      localStorage.getItem(`${STORAGE_PREFIX}${userId}`) ||
+      localStorage.getItem(`${STORAGE_PREFIX}${uid}`);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return {
-        userId,
-        enabled: parsed.enabled !== undefined ? parsed.enabled : DEFAULT_NOTIF_PREFS.enabled,
-        soundType: parsed.soundType || DEFAULT_NOTIF_PREFS.soundType,
-        soundsPerType: {
-          ...DEFAULT_SOUNDS_PER_TYPE,
-          ...(parsed.soundsPerType || {}),
-        },
-        customAudioGeneral: parsed.customAudioGeneral || undefined,
-        customAudioPerType: parsed.customAudioPerType || undefined,
-        volumePercent: typeof parsed.volumePercent === 'number' ? parsed.volumePercent : DEFAULT_NOTIF_PREFS.volumePercent,
-        volumesPerType: {
-          ...DEFAULT_NOTIF_PREFS.volumesPerType,
-          ...(parsed.volumesPerType || {}),
-        },
-        scheduleEnabled: parsed.scheduleEnabled !== undefined ? parsed.scheduleEnabled : DEFAULT_NOTIF_PREFS.scheduleEnabled,
-        scheduleStartTime: parsed.scheduleStartTime || DEFAULT_NOTIF_PREFS.scheduleStartTime,
-        scheduleEndTime: parsed.scheduleEndTime || DEFAULT_NOTIF_PREFS.scheduleEndTime,
-        externalAlerts: {
-          ...DEFAULT_NOTIF_PREFS.externalAlerts,
-          ...(parsed.externalAlerts || {}),
-        },
-        alerts: {
-          ...DEFAULT_NOTIF_PREFS.alerts,
-          ...(parsed.alerts || {}),
-        },
-        metaAlerts: {
-          diaria: {
-            ...DEFAULT_NOTIF_PREFS.metaAlerts.diaria,
-            ...(parsed.metaAlerts?.diaria || {}),
-          },
-          semanal: {
-            ...DEFAULT_NOTIF_PREFS.metaAlerts.semanal,
-            ...(parsed.metaAlerts?.semanal || {}),
-          },
-          mensal: {
-            ...DEFAULT_NOTIF_PREFS.metaAlerts.mensal,
-            ...(parsed.metaAlerts?.mensal || {}),
-          },
-        },
-      };
+      return normalizePrefsObject(userId, parsed);
+    }
+
+    const configMap = readNotifConfigMapLocal();
+    const mapped = configMap[uid] || configMap[userId];
+    if (mapped) {
+      return normalizePrefsObject(userId, mapped);
     }
   } catch (err) {
     console.warn('Erro ao ler preferências de notificação:', err);
@@ -650,7 +967,7 @@ export function getUserNotificationPreferences(userId: string): UserNotification
 }
 
 /**
- * Salva as preferências no LocalStorage e sincroniza com o Supabase
+ * Salva as preferências no LocalStorage e sincroniza com o Supabase (fenix_kv_store)
  */
 export async function saveUserNotificationPreferences(
   userIdOrPrefs: string | UserNotificationPreferences,
@@ -663,27 +980,83 @@ export async function saveUserNotificationPreferences(
       ? { ...optionalPrefs, userId: userIdOrPrefs }
       : (userIdOrPrefs as UserNotificationPreferences);
 
+  const uid = normalizeUserId(prefs.userId);
+  const nowIso = new Date().toISOString();
+
   try {
-    const key = `${STORAGE_PREFIX}${prefs.userId}`;
-    localStorage.setItem(key, JSON.stringify(prefs));
+    const prefsWithTs: StoredNotifPrefsEntry = { ...prefs, updatedAt: nowIso };
+    const serialized = JSON.stringify(prefsWithTs);
+    localStorage.setItem(`${STORAGE_PREFIX}${prefs.userId}`, serialized);
+    localStorage.setItem(`${STORAGE_PREFIX}${uid}`, serialized);
+
+    const localMap = readNotifConfigMapLocal();
+    localMap[uid] = buildCompactNotifPrefsForRemote(prefs, nowIso);
+    setLocalCollectionSafe(NOTIFICACOES_CONFIG_SUPABASE_KEY, localMap);
+
     window.dispatchEvent(new CustomEvent('fenix_notif_prefs_updated', { detail: prefs }));
 
-    // Sincronizar com o Supabase de forma assíncrona (somente quando não estiver em modo emergencial offline)
+    // Sincronizar com o Supabase fenix_kv_store (somente quando não estiver em modo emergencial offline)
     const supabase = getSupabaseClient();
     if (supabase && !isEmergencyOfflineMode()) {
-      try {
-        await supabase.from('fenix_user_preferences').upsert(
-          {
-            user_id: prefs.userId,
-            preference_key: 'notification_settings',
-            preference_value: prefs,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id,preference_key' }
-        );
-      } catch (sbErr) {
-        console.warn('Aviso: Supabase preferences sync em fallback local:', sbErr);
-      }
+      await enqueueCollectionWrite(NOTIFICACOES_CONFIG_SUPABASE_KEY, async () => {
+        try {
+          const { data: remoteRow } = await withAbortableTimeout<any>(
+            (signal) =>
+              supabase
+                .from('fenix_kv_store')
+                .select('data')
+                .eq('key', NOTIFICACOES_CONFIG_SUPABASE_KEY)
+                .abortSignal(signal)
+                .maybeSingle(),
+            10000,
+            'Tempo limite ao consultar preferências de notificação.'
+          ).catch(() => ({ data: null }));
+
+          let baseMap: Record<string, StoredNotifPrefsEntry> = {};
+          if (remoteRow?.data) {
+            const parsedRemote =
+              typeof remoteRow.data === 'string' ? JSON.parse(remoteRow.data) : remoteRow.data;
+            if (parsedRemote && typeof parsedRemote === 'object' && !Array.isArray(parsedRemote)) {
+              baseMap = parsedRemote;
+            }
+          }
+
+          const mergedMap: Record<string, StoredNotifPrefsEntry> = {
+            ...baseMap,
+            ...readNotifConfigMapLocal(),
+            [uid]: buildCompactNotifPrefsForRemote(prefs, nowIso),
+          };
+
+          recordSelfSave(NOTIFICACOES_CONFIG_SUPABASE_KEY, nowIso);
+          const { error: upsertErr } = await withAbortableTimeout<any>(
+            (signal) =>
+              supabase
+                .from('fenix_kv_store')
+                .upsert(
+                  {
+                    key: NOTIFICACOES_CONFIG_SUPABASE_KEY,
+                    data: mergedMap,
+                    updated_at: nowIso,
+                    updated_by: prefs.userId || 'Usuário Fênix',
+                  },
+                  { onConflict: 'key' }
+                )
+                .select('updated_at')
+                .abortSignal(signal)
+                .maybeSingle(),
+            12000,
+            'Tempo limite ao salvar preferências de notificação no Supabase.'
+          );
+
+          if (!upsertErr) {
+            setLocalCollectionSafe(NOTIFICACOES_CONFIG_SUPABASE_KEY, mergedMap);
+          } else {
+            console.warn('Aviso: falha ao salvar preferências no Supabase:', upsertErr);
+          }
+        } catch (sbErr) {
+          console.warn('Aviso: Supabase preferences sync em fallback local:', sbErr);
+        }
+      });
     }
 
     return { success: true };

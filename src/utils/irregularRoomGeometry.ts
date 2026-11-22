@@ -9,7 +9,26 @@ export type IrregularTurnDirection =
   | 'right_angle'
   | 'left_angle';
 
-export type IrregularGeometryMethod = 'angles' | 'diagonals';
+export type IrregularGeometryMethod = 'angles' | 'diagonals' | 'floorplan_trace';
+
+export interface TracedNormalizedPoint {
+  id: string;
+  /** Coordenada X normalizada (0..1) relativa à largura original da imagem */
+  x: number;
+  /** Coordenada Y normalizada (0..1) relativa à altura original da imagem */
+  y: number;
+}
+
+export interface FloorplanTraceGeometryData {
+  points: TracedNormalizedPoint[];
+  imageWidth: number;
+  imageHeight: number;
+  isClosed: boolean;
+  /** Índice 0-based da parede do contorno usada como referência de escala */
+  referenceEdgeIndex: number;
+  /** Medida real informada pelo usuário em metros para a parede de referência */
+  referenceLengthMeters: number | null;
+}
 
 export interface IrregularWallSegment {
   id: string;
@@ -34,6 +53,7 @@ export interface IrregularRoomGeometryData {
   method: IrregularGeometryMethod;
   segments: IrregularWallSegment[];
   diagonals: IrregularDiagonalSpec[];
+  floorplanTrace?: FloorplanTraceGeometryData;
 }
 
 export interface SolvedPoint {
@@ -248,6 +268,299 @@ function solveSssTriangle(
   };
 }
 
+export function solveFloorplanTraceGeometry(
+  trace?: FloorplanTraceGeometryData | null
+): SolvedPolygonResult {
+  if (!trace || !Array.isArray(trace.points) || trace.points.length === 0) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters: 0,
+      enteredWallsSumMeters: 0,
+      isClosed: false,
+      closureGapMeters: null,
+      hasSelfIntersection: false,
+      vertices: [],
+      edges: [],
+      diagonals: [],
+      missingReasons: [
+        'Clique nos cantos do ambiente diretamente sobre a planta para traçar o contorno.',
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  const { points, isClosed } = trace;
+  const imgW = trace.imageWidth > 0 ? trace.imageWidth : 1000;
+  const imgH = trace.imageHeight > 0 ? trace.imageHeight : 1000;
+
+  if (points.length < 3 || !isClosed) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters: 0,
+      enteredWallsSumMeters: 0,
+      isClosed: false,
+      closureGapMeters: null,
+      hasSelfIntersection: false,
+      vertices: [],
+      edges: [],
+      diagonals: [],
+      missingReasons: [
+        points.length < 3
+          ? `Marque pelo menos 3 cantos na planta (atual: ${points.length}).`
+          : 'Finalize e feche o contorno clicando no ponto inicial (V1) ou em "Finalizar Contorno".',
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  const pixelVerts = points.map((pt) => ({
+    x: pt.x * imgW,
+    y: pt.y * imgH,
+  }));
+
+  const pixelEdgeLengths: number[] = [];
+  for (let i = 0; i < pixelVerts.length; i++) {
+    const a = pixelVerts[i];
+    const b = pixelVerts[(i + 1) % pixelVerts.length];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    pixelEdgeLengths.push(len);
+    if (len < 2) {
+      return {
+        isComplete: false,
+        statusLabel: 'Medidas pendentes',
+        areaSqm: null,
+        perimeterMeters: 0,
+        enteredWallsSumMeters: 0,
+        isClosed: true,
+        closureGapMeters: 0,
+        hasSelfIntersection: false,
+        vertices: pixelVerts,
+        edges: [],
+        diagonals: [],
+        missingReasons: [
+          `O trecho ${i + 1} (V${i + 1}–V${i + 1 === pixelVerts.length ? 1 : i + 2}) possui pontos praticamente sobrepostos. Afaste ou remova o ponto duplicado.`,
+        ],
+        needsGeometryDisambiguation: false,
+      };
+    }
+  }
+
+  const pixelEdges: SolvedWallEdge[] = pixelVerts.map((v, i) => {
+    const next = pixelVerts[(i + 1) % pixelVerts.length];
+    return {
+      index: i + 1,
+      id: `trace_edge_${i + 1}`,
+      start: v,
+      end: next,
+      lengthMeters: pixelEdgeLengths[i],
+    };
+  });
+
+  const hasSelfIntersection = detectPolygonSelfIntersection(pixelEdges, true);
+  if (hasSelfIntersection) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters: 0,
+      enteredWallsSumMeters: 0,
+      isClosed: true,
+      closureGapMeters: 0,
+      hasSelfIntersection: true,
+      vertices: pixelVerts,
+      edges: pixelEdges.map((e) => ({ ...e, lengthMeters: 0 })),
+      diagonals: [],
+      missingReasons: [
+        'As linhas do contorno se cruzam na planta. Mova os pontos ou refaça o contorno sem cruzamentos.',
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  const refIdx =
+    trace.referenceEdgeIndex >= 0 && trace.referenceEdgeIndex < pixelEdgeLengths.length
+      ? trace.referenceEdgeIndex
+      : 0;
+  const refPxLength = pixelEdgeLengths[refIdx];
+  const refRealLength = trace.referenceLengthMeters;
+
+  if (
+    typeof refRealLength !== 'number' ||
+    !Number.isFinite(refRealLength) ||
+    refRealLength <= 0
+  ) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters: 0,
+      enteredWallsSumMeters: 0,
+      isClosed: true,
+      closureGapMeters: 0,
+      hasSelfIntersection: false,
+      vertices: [],
+      edges: [],
+      diagonals: [],
+      missingReasons: [
+        `Selecione uma parede de referência (ex.: Parede ${refIdx + 1}) e informe sua medida real em metros para calibrar a escala.`,
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  const metersPerPixel = refRealLength / refPxLength;
+  if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters: 0,
+      enteredWallsSumMeters: 0,
+      isClosed: true,
+      closureGapMeters: 0,
+      hasSelfIntersection: false,
+      vertices: [],
+      edges: [],
+      diagonals: [],
+      missingReasons: [
+        'Não foi possível calibrar a escala com a parede selecionada. Escolha outra parede ou informe as medidas manualmente.',
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  const origin = pixelVerts[0];
+  const meterVertices: SolvedPoint[] = pixelVerts.map((v) => ({
+    x: (v.x - origin.x) * metersPerPixel,
+    y: (v.y - origin.y) * metersPerPixel,
+  }));
+
+  const meterEdges: SolvedWallEdge[] = meterVertices.map((start, i) => {
+    const end = meterVertices[(i + 1) % meterVertices.length];
+    const len = i === refIdx ? round2(refRealLength) : round2(pixelEdgeLengths[i] * metersPerPixel);
+    return {
+      index: i + 1,
+      id: `trace_edge_${i + 1}`,
+      start,
+      end,
+      lengthMeters: len,
+    };
+  });
+
+  if (meterEdges.some((e) => e.lengthMeters <= 0)) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters: 0,
+      enteredWallsSumMeters: 0,
+      isClosed: true,
+      closureGapMeters: 0,
+      hasSelfIntersection: false,
+      vertices: meterVertices,
+      edges: meterEdges,
+      diagonals: [],
+      missingReasons: [
+        'A escala informada gerou trecho com medida nula. Confira a medida de referência ou ajuste os pontos.',
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  const perimeterMeters = round2(meterEdges.reduce((acc, e) => acc + e.lengthMeters, 0));
+  const areaSqm = computeShoelaceArea(meterVertices);
+
+  if (areaSqm <= 0 || !Number.isFinite(areaSqm)) {
+    return {
+      isComplete: false,
+      statusLabel: 'Medidas pendentes',
+      areaSqm: null,
+      perimeterMeters,
+      enteredWallsSumMeters: perimeterMeters,
+      isClosed: true,
+      closureGapMeters: 0,
+      hasSelfIntersection: false,
+      vertices: meterVertices,
+      edges: meterEdges,
+      diagonals: [],
+      missingReasons: [
+        'Os pontos marcados formam uma área nula (colineares). Ajuste os cantos na planta ou use a edição manual.',
+      ],
+      needsGeometryDisambiguation: false,
+    };
+  }
+
+  return {
+    isComplete: true,
+    statusLabel: 'Medidas completas',
+    areaSqm,
+    perimeterMeters,
+    enteredWallsSumMeters: perimeterMeters,
+    isClosed: true,
+    closureGapMeters: 0,
+    hasSelfIntersection: false,
+    vertices: meterVertices,
+    edges: meterEdges,
+    diagonals: [],
+    missingReasons: [],
+    needsGeometryDisambiguation: false,
+  };
+}
+
+export function convertFloorplanTraceToManualSegments(
+  trace: FloorplanTraceGeometryData
+): IrregularWallSegment[] {
+  const solved = solveFloorplanTraceGeometry(trace);
+  if (!solved.isComplete || solved.edges.length < 3) return [];
+
+  return solved.edges.map((edge, idx) => {
+    if (idx === 0) {
+      return {
+        id: `seg_trace_${Date.now()}_${idx}`,
+        lengthMeters: edge.lengthMeters,
+        turn: 'pending',
+        angleDegrees: null,
+      };
+    }
+
+    const prev = solved.edges[idx - 1];
+    const prevAngle = Math.atan2(prev.end.y - prev.start.y, prev.end.x - prev.start.x);
+    const curAngle = Math.atan2(edge.end.y - edge.start.y, edge.end.x - edge.start.x);
+    let deltaDeg = ((curAngle - prevAngle) * 180) / Math.PI;
+    while (deltaDeg > 180) deltaDeg -= 360;
+    while (deltaDeg <= -180) deltaDeg += 360;
+
+    let turn: IrregularTurnDirection = 'right_90';
+    let angleDegrees: number | null = null;
+
+    if (Math.abs(deltaDeg - 90) <= 2) {
+      turn = 'right_90';
+    } else if (Math.abs(deltaDeg + 90) <= 2) {
+      turn = 'left_90';
+    } else if (deltaDeg > 0 && deltaDeg < 180) {
+      turn = 'right_angle';
+      angleDegrees = round2(Math.max(1, Math.min(179, deltaDeg)));
+    } else if (deltaDeg < 0 && deltaDeg > -180) {
+      turn = 'left_angle';
+      angleDegrees = round2(Math.max(1, Math.min(179, Math.abs(deltaDeg))));
+    } else {
+      turn = 'right_angle';
+      angleDegrees = 1;
+    }
+
+    return {
+      id: `seg_trace_${Date.now()}_${idx}`,
+      lengthMeters: edge.lengthMeters,
+      turn,
+      angleDegrees,
+    };
+  });
+}
+
 /**
  * Resolve o contorno e área real de um ambiente irregular sem nunca inventar ângulos,
  * diagonais ou medidas ausentes.
@@ -255,6 +568,10 @@ function solveSssTriangle(
 export function solveIrregularRoomGeometry(
   data: IrregularRoomGeometryData
 ): SolvedPolygonResult {
+  if (data.method === 'floorplan_trace') {
+    return solveFloorplanTraceGeometry(data.floorplanTrace);
+  }
+
   const segments = Array.isArray(data.segments) ? data.segments : [];
   const enteredWallsSum = round2(
     segments.reduce(

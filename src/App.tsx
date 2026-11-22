@@ -4,6 +4,7 @@ import { ClientRecord, SavedOrcamento } from './types';
 import { getStoredAccounts, isEderPerez, isUserRevoked, fetchAccountsFromSupabase } from './utils/auth';
 import { flushAllPendingSync, initSupabaseRealtimeSubscription, syncModuleData } from './utils/supabaseClient';
 import { startGlobalNotificationScheduler } from './utils/notificationScheduler';
+import { loadUserNotificationPreferencesFromSupabase } from './utils/userNotificationPreferences';
 import { setupGlobalSearchHighlighter } from './utils/searchHighlighter';
 import { Loader2, Eye, Check, X } from 'lucide-react';
 import officeBg from './assets/images/fenix_office_bg_1788695593982.jpg';
@@ -193,8 +194,9 @@ export default function App() {
       .then(() => syncModuleData(currentTabRef.current, true))
       .catch(() => {});
 
-    // Sincroniza permissões e contas de usuário em segundo plano após autenticação (sem disparar tempestade de leituras)
+    // Sincroniza permissões, preferências de notificação e contas de usuário em segundo plano após autenticação
     fetchAccountsFromSupabase().catch(() => {});
+    loadUserNotificationPreferencesFromSupabase(activeUser).catch(() => {});
 
     // Sincronização periódica resiliente em background a cada 5 minutos do módulo ativo
     const syncInterval = setInterval(() => {

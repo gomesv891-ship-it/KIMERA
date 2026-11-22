@@ -33,7 +33,7 @@ import {
   Users,
 } from 'lucide-react';
 import { ClientRecord, ClientActivity, ActivityType } from '../types';
-import { getClientActivities, addClientActivity } from '../utils/activities';
+import { getClientActivities, addClientActivity, syncClientActivitiesFromSupabase } from '../utils/activities';
 
 interface ClientePerfilModalProps {
   client: ClientRecord;
@@ -208,16 +208,23 @@ export const ClientePerfilModal: React.FC<ClientePerfilModalProps> = ({
 
   useEffect(() => {
     refreshActivities();
+    let active = true;
+    syncClientActivitiesFromSupabase()
+      .then(() => {
+        if (active) refreshActivities();
+      })
+      .catch(() => {});
 
     const handleActivitiesUpdate = (e: Event) => {
       const customEvent = e as CustomEvent<{ clientId?: string }>;
-      if (!customEvent.detail || customEvent.detail.clientId === client.id) {
+      if (!customEvent.detail || !customEvent.detail.clientId || customEvent.detail.clientId === client.id) {
         refreshActivities();
       }
     };
 
     window.addEventListener('fenix_activities_updated', handleActivitiesUpdate);
     return () => {
+      active = false;
       window.removeEventListener('fenix_activities_updated', handleActivitiesUpdate);
     };
   }, [client.id]);

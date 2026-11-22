@@ -35,7 +35,14 @@ import {
   updateSingleUserMeta,
   normalizeUserMetaKey,
 } from '../../utils/configOrcamentoEMetas';
-import { saveItemToSupabase, deleteItemFromSupabase } from '../../utils/supabaseClient';
+import {
+  deleteItemFromSupabase,
+  getLocalCollectionSafe,
+  getLocalRawSafe,
+  pullCollectionsFromSupabase,
+  saveItemToSupabase,
+  saveWholeCollectionToSupabase,
+} from '../../utils/supabaseClient';
 import {
   syncSingleMetaSaleToVendas,
   removeMetaSaleFromVendas,
@@ -155,7 +162,7 @@ export const MetasMarketplaceJeferson: React.FC<MetasMarketplaceJefersonProps> =
   // Padrão inicial: puxado dinamicamente do cadastro de Jeferson Trolesi (ou 50k Shopee + 50k Mercado Livre = 100k)
   const [metasByMonth, setMetasByMonth] = useState<Record<string, MarketplaceChannelMeta>>(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_MARKETPLACE_METAS_KEY);
+      const stored = getLocalRawSafe(STORAGE_MARKETPLACE_METAS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (typeof parsed === 'object' && parsed !== null) return parsed;
@@ -185,30 +192,21 @@ export const MetasMarketplaceJeferson: React.FC<MetasMarketplaceJefersonProps> =
 
   // Base de vendas de marketplace cadastradas
   const [sales, setSales] = useState<MarketplaceSale[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_MARKETPLACE_SALES_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
+    return getLocalCollectionSafe<MarketplaceSale>(STORAGE_MARKETPLACE_SALES_KEY, []);
   });
 
-  // Listener para sincronizar alterações de vendas entre abas ou componentes
+  // Sincronização inicial e listener para alterações entre abas ou dispositivos
   useEffect(() => {
+    let active = true;
     const handleSalesSync = () => {
-      try {
-        const stored = localStorage.getItem(STORAGE_MARKETPLACE_SALES_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed)) setSales(parsed);
-        }
-      } catch {}
+      if (!active) return;
+      const list = getLocalCollectionSafe<MarketplaceSale>(STORAGE_MARKETPLACE_SALES_KEY, []);
+      if (Array.isArray(list)) setSales(list);
     };
     const handleMetasSync = () => {
+      if (!active) return;
       try {
-        const stored = localStorage.getItem(STORAGE_MARKETPLACE_METAS_KEY);
+        const stored = getLocalRawSafe(STORAGE_MARKETPLACE_METAS_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (typeof parsed === 'object' && parsed !== null) {
@@ -225,11 +223,26 @@ export const MetasMarketplaceJeferson: React.FC<MetasMarketplaceJefersonProps> =
         }));
       } catch {}
     };
+
+    pullCollectionsFromSupabase([
+      STORAGE_MARKETPLACE_SALES_KEY,
+      STORAGE_MARKETPLACE_METAS_KEY,
+      'fenix_metas_sales_db',
+      'fenix_individual_metas_map',
+    ])
+      .then(() => {
+        if (!active) return;
+        handleSalesSync();
+        handleMetasSync();
+      })
+      .catch(() => {});
+
     window.addEventListener('fenix_marketplace_sales_updated', handleSalesSync);
     window.addEventListener('storage', handleSalesSync);
     window.addEventListener('fenix_metas_config_updated', handleMetasSync);
     window.addEventListener('fenix_metas_updated', handleMetasSync);
     return () => {
+      active = false;
       window.removeEventListener('fenix_marketplace_sales_updated', handleSalesSync);
       window.removeEventListener('storage', handleSalesSync);
       window.removeEventListener('fenix_metas_config_updated', handleMetasSync);
@@ -425,6 +438,9 @@ export const MetasMarketplaceJeferson: React.FC<MetasMarketplaceJefersonProps> =
     setMetasByMonth(updatedMap);
     try {
       localStorage.setItem(STORAGE_MARKETPLACE_METAS_KEY, JSON.stringify(updatedMap));
+      saveWholeCollectionToSupabase(STORAGE_MARKETPLACE_METAS_KEY, updatedMap, currentUserName).catch(
+        () => {}
+      );
       // Atualiza também a meta individual de Jeferson no mapa geral do CRM
       const newTotal = valShopee + valML;
       updateSingleUserMeta('Jeferson Trolesi', newTotal);

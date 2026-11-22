@@ -77,7 +77,7 @@ const KNOWN_ROOM_PATTERNS: RegExp[] = [
   /\bDORMIT[OÓ]RIO(?:S)?\b/i,
   /\bDORM\.?\b/i,
   /\bSU[IÍ]TE(?:\s+MASTER)?\b/i,
-  /\bSALA(?:\s+DE\s+(?:ESTAR|JANTAR|TV|REUNI[AÃ]O|ESPERA|JOGOS|T[EÉ]CNICA))?\b/i,
+  /\bSALA(?:\s+DE\s+(?:ESTAR|JANTAR|TV|REUNI[AÃ]O|ESPERA|JOGOS|T[EÉ]CNICA|[IÍ]NTIMA))?\b/i,
   /\bLIVING\b/i,
   /\bESTAR\b/i,
   /\bJANTAR\b/i,
@@ -105,6 +105,7 @@ const KNOWN_ROOM_PATTERNS: RegExp[] = [
   /\bCLOSET\b/i,
   /\bDESPENSA\b/i,
   /\bDEP[OÓ]SITO\b/i,
+  /\bROUPARIA\b/i,
   /\bATELI[EÊ]\b/i,
   /\bRECEP[CÇ][AÃ]O\b/i,
   /\bCONSULT[OÓ]RIO\b/i,
@@ -112,26 +113,40 @@ const KNOWN_ROOM_PATTERNS: RegExp[] = [
   /\bESTOQUE\b/i,
   /\bMEZANINO\b/i,
   /\bQUINTAL\b/i,
+  /\bJARDIM(?:\s+DE\s+INVERNO)?\b/i,
   /\bCHURRASQUEIRA\b/i,
   /\bBRINQUEDOTECA\b/i,
   /\bACADEMIA\b/i,
   /\bADEGA\b/i,
   /\bEST[UÚ]DIO\b/i,
+  /\bSTUDIO\b/i,
+  /\bED[IÍ]CULA\b/i,
   /\bAUDIT[OÓ]RIO\b/i,
+  /\bALMOXARIFADO\b/i,
+  /\bSHOWROOM\b/i,
 ];
 
 const NON_ROOM_BLACKLIST: RegExp[] = [
-  /^(?:PLANTA\s+BAIXA|PLANTA|PROJETO|ESCALA|ESC\.?|COTAS|LEGENDA|OBSERVA[CÇ][OÕ]ES|OBS\.?|NORTE|DATA|FOLHA|PRANCHA|CLIENTE|ARQUITETO|ENGENHEIRO|CREA|CAU|DETALHE|CORTE|FACHADA|COBERTURA|PAVIMENTO|T[EÉ]RREO|SUBSOLO|NÍVEL|NIVEL|PROJE[CÇ][AÃ]O|RUA|AVENIDA|AV\.?|BAIRRO|CIDADE|PORTA|JANELA|PAREDE|PILAR|VIGA|LAJE|TOTAL|[AÁ]REA\s+TOTAL|[AÁ]REA\s+CONSTRU[IÍ]DA|[AÁ]REA\s+DO\s+TERRENO|LOTE|QUADRA|REVIS[AÃ]O)$/i,
-  /^(?:P\d+|J\d+|B\d+|C\d+|V\d+|PEIT\.?)$/i,
+  /^(?:PLANTA\s+BAIXA|PLANTA(?:\s+DE\s+.*|\s+HUMANIZADA)?|PROJETO(?:\s+.*)?|ESCALA|ESC\.?|COTAS?|LEGENDA|OBSERVA[CÇ][OÕ]ES|OBS\.?|NORTE|DATA|FOLHA|PRANCHA|CLIENTE|ARQUITETO|ENGENHEIRO|CREA|CAU|DETALHE(?:\s+.*)?|CORTE(?:\s+[A-Z0-9]+)?|FACHADA(?:\s+.*)?|COBERTURA|PAVIMENTO(?:\s+.*)?|T[EÉ]RREO|SUBSOLO|N[IÍ]VEL|PROJE[CÇ][AÃ]O(?:\s+.*)?|RUA|AVENIDA|AV\.?|BAIRRO|CIDADE|PORTA|JANELA|PAREDE|PILAR|VIGA|LAJE|BEIRAL|TELHADO|MURO|CAL[CÇ]ADA|RECUO|AFASTAMENTO|P[EÉ]\s+DIREITO|ALTURA|METROS|TOTAL|[AÁ]REA\s+TOTAL|[AÁ]REA\s+CONSTRU[IÍ]DA|[AÁ]REA\s+DO\s+TERRENO|LOTE|QUADRA|REVIS[AÃ]O|SOBE|DESCE|ACESSO|ENTRADA|SA[IÍ]DA)$/i,
+  /^(?:P\d+|J\d+|B\d+|C\d+|V\d+|PEIT\.?|N\.?[AP]\.?)$/i,
 ];
 
 function stripDiacritics(input: string): string {
   return input.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+export function normalizeRoomComparisonKey(rawName: string): string {
+  return stripDiacritics(rawName)
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function normalizeRoomDisplayName(rawName: string): string {
   const cleaned = rawName
     .replace(/[|[\]{}()]+/g, ' ')
+    .replace(/^(?:\d{1,2}\s*[.\-–)]\s*|[-–•*]+\s*)/, '')
+    .replace(/[-–•*]+$/, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return '';
@@ -863,6 +878,274 @@ function extractLinesFromTesseractData(
   }
 
   return tokens;
+}
+
+export interface RoomNamesOcrResult {
+  roomNames: string[];
+  alreadyExistingCount: number;
+  extractionMethod: 'pdf_vector' | 'ocr' | 'hybrid';
+  rawTokensCount: number;
+}
+
+function mergeStackedRoomNameTokens(tokens: FloorplanTextToken[]): FloorplanTextToken[] {
+  if (tokens.length <= 1) return tokens;
+  const result = tokens.map((t) => ({ ...t }));
+  const consumed = new Set<number>();
+
+  for (let i = 0; i < result.length; i++) {
+    if (consumed.has(i)) continue;
+    const top = result[i];
+    if (top.isVertical) continue;
+    const upperTop = top.text.trim().toUpperCase();
+    const endsWithConnector = /(?:\b(?:DE|DA|DO|DAS|DOS|E)|\/|-)$/i.test(upperTop);
+    const isCompoundPrefix = /^(?:[AÁ]REA|ESPA[CÇ]O|HOME|SALA|VARANDA|BANHEIRO|SU[IÍ]TE|HALL)$/i.test(
+      upperTop
+    );
+    if (!endsWithConnector && !isCompoundPrefix) continue;
+
+    const topCx = top.x + top.width / 2;
+    const topBottom = top.y + top.height;
+
+    let bestIdx = -1;
+    let bestDy = Infinity;
+
+    for (let j = 0; j < result.length; j++) {
+      if (i === j || consumed.has(j)) continue;
+      const bottom = result[j];
+      if (bottom.isVertical) continue;
+      const dy = bottom.y - topBottom;
+      if (dy < -0.005 || dy > Math.max(0.032, top.height * 2.2)) continue;
+      const bottomCx = bottom.x + bottom.width / 2;
+      if (Math.abs(bottomCx - topCx) > Math.max(0.08, Math.max(top.width, bottom.width) * 0.9)) {
+        continue;
+      }
+      // Evita fundir com cotas/números puros
+      if (!/[A-Za-zÀ-ÿ]{2,}/.test(bottom.text)) continue;
+      if (/^\d+(?:[.,]\d+)?\s*(?:m²|m2|m|cm|ml)?$/i.test(bottom.text.trim())) continue;
+
+      if (dy < bestDy) {
+        bestDy = dy;
+        bestIdx = j;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      const bottom = result[bestIdx];
+      top.text = `${top.text} ${bottom.text}`.replace(/\s+/g, ' ').trim();
+      const minX = Math.min(top.x, bottom.x);
+      const minY = Math.min(top.y, bottom.y);
+      const maxX = Math.max(top.x + top.width, bottom.x + bottom.width);
+      const maxY = Math.max(top.y + top.height, bottom.y + bottom.height);
+      top.x = minX;
+      top.y = minY;
+      top.width = maxX - minX;
+      top.height = maxY - minY;
+      top.confidence = Math.min(top.confidence, bottom.confidence);
+      consumed.add(bestIdx);
+    }
+  }
+
+  return result.filter((_, idx) => !consumed.has(idx));
+}
+
+function stripEmbeddedMeasurementsForRoomName(rawText: string): string {
+  let working = rawText.trim();
+  if (!working) return '';
+
+  // Remove indicações de escala
+  working = working.replace(/(?:ESCALA|ESC\.?)\s*[:=]?\s*1\s*[:/]\s*\d{2,4}/gi, ' ');
+  // Remove pares de dimensões (ex: 3,20 x 4,00 ou 3.20x4.00m)
+  working = working.replace(
+    /\d+(?:[.,]\d{1,2})?\s*(?:cm|mts|mt|m)?\s*[x×*]\s*\d+(?:[.,]\d{1,2})?\s*(?:cm|mts|mt|m)?/gi,
+    ' '
+  );
+  // Remove valores de área explícitos (ex: 12,50 m² ou A=12,50m2)
+  working = working.replace(
+    /(?:[AÁ](?:REA)?\s*[:=]?\s*)?\d+(?:[.,]\d{1,2})?\s*(?:m²|m2|M²|M2)/gi,
+    ' '
+  );
+  // Remove perímetro explícito (ex: P=14,00m)
+  working = working.replace(/(?:PER[IÍ]METRO|P)\s*[:=]\s*\d+(?:[.,]\d{1,2})?\s*(?:cm|ml|m)?/gi, ' ');
+  // Remove medidas decimais ou com unidade (preserva inteiros de identificação como "Quarto 1", "Suíte 02")
+  working = working.replace(/\b\d+[.,]\d{1,2}\s*(?:cm|mts|mt|ml|m)?\b/gi, ' ');
+  working = working.replace(/\b\d+\s*(?:cm|mts|mt|ml|m)\b/gi, ' ');
+  working = working.replace(/\s+/g, ' ').trim();
+  return working;
+}
+
+/**
+ * Extrai EXCLUSIVAMENTE os nomes dos ambientes identificados nos tokens da planta.
+ * Não identifica dimensões, cotas, largura ou comprimento e não calcula área nem perímetro.
+ */
+export function extractRoomNamesFromTokens(
+  rawTokens: FloorplanTextToken[],
+  existingRoomNames: string[] = []
+): RoomNamesOcrResult {
+  const horizontal = groupHorizontalTokens(rawTokens);
+  const tokens = mergeStackedRoomNameTokens(horizontal);
+
+  const existingKeys = new Set(
+    existingRoomNames
+      .map((n) => normalizeRoomComparisonKey(n))
+      .filter(Boolean)
+  );
+  const seenInScan = new Set<string>();
+
+  const roomNames: string[] = [];
+  let alreadyExistingCount = 0;
+
+  for (const tok of tokens) {
+    const cleaned = stripEmbeddedMeasurementsForRoomName(tok.text);
+    const labelText = cleaned.replace(/[.,;:\-–]+$/g, '').trim();
+    if (!labelText) continue;
+    if (isBlacklistedNonRoomText(labelText)) continue;
+
+    const isKnown = matchesKnownRoomTerm(labelText);
+    const isGeneric = isPlausibleGenericRoomLabel(labelText);
+    const hasVowel = /[aeiouáàâãéêíóôõú]/i.test(labelText);
+    const isCleanFormat =
+      /^(?:[A-ZÀ-Ú]{3,}|[A-ZÀ-Ú][a-zà-ÿ]{2,})(?:\s+(?:de|da|do|das|dos|e|\/|[A-ZÀ-Ú][A-Za-zÀ-ÿ0-9/.\-]*|\d{1,2}))*$/.test(
+        labelText
+      );
+    const hasSufficientConfidence =
+      tok.source === 'pdf_vector' ||
+      (isKnown ? tok.confidence >= 20 : tok.confidence >= 70);
+
+    if (!hasSufficientConfidence) continue;
+    if (!isKnown && !(isGeneric && hasVowel && isCleanFormat && labelText.length >= 4)) {
+      continue;
+    }
+
+    const displayName = normalizeRoomDisplayName(labelText);
+    if (!displayName || isBlacklistedNonRoomText(displayName)) continue;
+
+    const key = normalizeRoomComparisonKey(displayName);
+    if (!key || seenInScan.has(key)) continue;
+    seenInScan.add(key);
+
+    if (existingKeys.has(key)) {
+      alreadyExistingCount += 1;
+      continue;
+    }
+
+    roomNames.push(displayName);
+  }
+
+  const hasPdf = rawTokens.some((t) => t.source === 'pdf_vector');
+  const hasOcr = rawTokens.some((t) => t.source === 'ocr');
+
+  return {
+    roomNames,
+    alreadyExistingCount,
+    extractionMethod: hasPdf && hasOcr ? 'hybrid' : hasPdf ? 'pdf_vector' : 'ocr',
+    rawTokensCount: rawTokens.length,
+  };
+}
+
+/**
+ * Executa OCR local (e leitura vetorial de PDF quando disponível) para identificar
+ * EXCLUSIVAMENTE os nomes dos ambientes da planta importada.
+ */
+export async function runLocalFloorplanRoomNamesRecognition(params: {
+  previewDataUrl: string;
+  vectorTextTokens?: FloorplanTextToken[];
+  existingRoomNames?: string[];
+  onProgress?: (info: FloorplanOcrProgress) => void;
+}): Promise<RoomNamesOcrResult> {
+  const { previewDataUrl, vectorTextTokens = [], existingRoomNames = [], onProgress } = params;
+
+  onProgress?.({
+    stage: 'preparing',
+    progress: 10,
+    message: 'Preparando imagem da planta para identificar ambientes...',
+  });
+
+  if (vectorTextTokens.length >= 4) {
+    onProgress?.({
+      stage: 'parsing',
+      progress: 80,
+      message: 'Identificando nomes dos ambientes no PDF...',
+    });
+    const vectorResult = extractRoomNamesFromTokens(vectorTextTokens, existingRoomNames);
+    if (vectorResult.roomNames.length > 0 || vectorResult.alreadyExistingCount > 0) {
+      onProgress?.({
+        stage: 'parsing',
+        progress: 100,
+        message: 'Ambientes identificados!',
+      });
+      return vectorResult;
+    }
+  }
+
+  if (!previewDataUrl) {
+    throw new Error('Nenhuma imagem da planta disponível para identificar ambientes.');
+  }
+
+  const { canvas, width, height } = await buildPreprocessedCanvas(previewDataUrl);
+
+  onProgress?.({
+    stage: 'recognizing',
+    progress: 25,
+    message: 'Inicializando motor OCR local...',
+  });
+
+  const worker = await createWorker('por', OEM.LSTM_ONLY, {
+    workerPath: '/tesseract/worker.min.js',
+    corePath: '/tesseract',
+    langPath: '/tesseract',
+    workerBlobURL: false,
+    gzip: true,
+    logger: (msg) => {
+      if (msg.status === 'recognizing text' && typeof msg.progress === 'number') {
+        const pct = Math.round(35 + msg.progress * 50);
+        onProgress?.({
+          stage: 'recognizing',
+          progress: pct,
+          message: `Identificando nomes dos ambientes (${Math.round(msg.progress * 100)}%)...`,
+        });
+      }
+    },
+  });
+
+  try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+      preserve_interword_spaces: '1',
+    });
+
+    const sparseRes = await worker.recognize(canvas, {}, { text: true, blocks: true });
+    const sparseTokens = extractLinesFromTesseractData(sparseRes.data, width, height);
+    let combinedTokens =
+      vectorTextTokens.length > 0 ? [...vectorTextTokens, ...sparseTokens] : sparseTokens;
+    let result = extractRoomNamesFromTokens(combinedTokens, existingRoomNames);
+
+    // Fallback com segmentação automática caso SPARSE_TEXT não encontre nomes de ambientes
+    if (result.roomNames.length === 0 && result.alreadyExistingCount === 0) {
+      await worker.setParameters({
+        tessedit_pageseg_mode: PSM.AUTO,
+        preserve_interword_spaces: '1',
+      });
+      const autoRes = await worker.recognize(canvas, {}, { text: true, blocks: true });
+      const autoTokens = extractLinesFromTesseractData(autoRes.data, width, height);
+      if (autoTokens.length > 0) {
+        combinedTokens =
+          vectorTextTokens.length > 0
+            ? [...vectorTextTokens, ...sparseTokens, ...autoTokens]
+            : [...sparseTokens, ...autoTokens];
+        result = extractRoomNamesFromTokens(combinedTokens, existingRoomNames);
+      }
+    }
+
+    onProgress?.({
+      stage: 'parsing',
+      progress: 100,
+      message: 'Identificação concluída!',
+    });
+
+    return result;
+  } finally {
+    await worker.terminate();
+  }
 }
 
 /**
