@@ -188,6 +188,7 @@ export interface MetasScreenProps {
   currentUserName?: string;
   onBackToCadastro?: () => void;
   onNavigateTab?: (tab: string) => void;
+  isActive?: boolean;
 }
 
 // Configuração oficial de cores e ícones por Tipo de Cliente Fênix
@@ -1066,7 +1067,10 @@ export const MetasScreen: React.FC<MetasScreenProps> = ({
   currentUserName = 'Vanessa Gomes',
   onBackToCadastro,
   onNavigateTab,
+  isActive = true,
 }) => {
+  const isActiveRef = React.useRef(isActive);
+  isActiveRef.current = isActive;
   // Configurações de Metas (Lê as configurações salvas ou padrão)
   const [metasConfig, setMetasConfig] = useState<MetasParametersConfig>(() =>
     getMetasParametersConfig()
@@ -1322,13 +1326,19 @@ export const MetasScreen: React.FC<MetasScreenProps> = ({
       handleSync();
       fetchRemoteMetas();
 
+    const handleWindowFocus = () => {
+      if (isActiveRef.current) {
+        fetchRemoteMetas();
+      }
+    };
+
     window.addEventListener('fenix_metas_updated', handleSync);
     window.addEventListener('fenix_followup_updated', handleSync);
     window.addEventListener('fenix_orcamentos_updated', handleSync);
     window.addEventListener('fenix_vendas_gerencial_updated', handleSync);
     window.addEventListener('fenix_vendas_updated', handleSync);
     window.addEventListener('storage', handleSync);
-    window.addEventListener('focus', fetchRemoteMetas);
+    window.addEventListener('focus', handleWindowFocus);
     return () => {
       window.removeEventListener('fenix_metas_updated', handleSync);
       window.removeEventListener('fenix_followup_updated', handleSync);
@@ -1336,7 +1346,7 @@ export const MetasScreen: React.FC<MetasScreenProps> = ({
       window.removeEventListener('fenix_vendas_gerencial_updated', handleSync);
       window.removeEventListener('fenix_vendas_updated', handleSync);
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('focus', fetchRemoteMetas);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, [currentUserName]);
 

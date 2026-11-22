@@ -17,6 +17,7 @@ import {
   FolderEdit,
   Palette,
   ShieldCheck,
+  Loader2,
 } from 'lucide-react';
 import { PriceTableTier } from '../types';
 import {
@@ -34,13 +35,16 @@ import {
   isItemTombstoned,
   mergeDeletionTombstoneMaps,
   safeMergeLists,
+  deduplicateListById,
   DELETED_RECORDS_STORAGE_KEY,
 } from '../utils/supabaseClient';
 import {
   saveProductCostToSupabase,
-  getAllProductCosts,
+  getLocalProductCosts,
   mergeProductCosts,
+  KEY_PRODUCT_COSTS_DB,
   EVENT_PRODUCT_COSTS_UPDATED,
+  ProductCostsMap,
 } from '../utils/productCostsService';
 import {
   detectSearchCategoryIntent,
@@ -179,73 +183,111 @@ function getContrastStyles(hexColor: string) {
   }
 }
 
+function normalizeProductItemPrices(item: any): GroupProductItem {
+  const hasCF = item.priceClienteFinal !== undefined && item.priceClienteFinal !== null;
+  const base = Number(hasCF ? item.priceClienteFinal : (item.price ?? 89.90));
+  const safeBase = isNaN(base) ? 89.90 : base;
+  const hasRev = item.priceRevenda !== undefined && item.priceRevenda !== null;
+  const hasCons = item.priceConstrutora !== undefined && item.priceConstrutora !== null;
+  return {
+    ...item,
+    priceClienteFinal: hasCF ? Number(item.priceClienteFinal) : safeBase,
+    priceRevenda: hasRev
+      ? Number(item.priceRevenda)
+      : Math.round(safeBase * 0.82 * 100) / 100,
+    priceConstrutora: hasCons
+      ? Number(item.priceConstrutora)
+      : Math.round(safeBase * 0.90 * 100) / 100,
+  };
+}
+
+function readLocalCatalogFallback(currentUserName?: string): {
+  categories: ProductCategory[];
+  groups: ProductGroup[];
+  products: GroupProductItem[];
+} {
+  let cats: ProductCategory[] = DEFAULT_CATEGORIES;
+  try {
+    const deletedMap = getDeletedIdsForCollection('fenix_product_categories_data');
+    const raw = getLocalRawSafe('fenix_product_categories_data');
+    const source = raw !== null
+      ? getLocalCollectionSafe<ProductCategory>('fenix_product_categories_data', [])
+      : DEFAULT_CATEGORIES;
+    cats = deduplicateListById(
+      source.filter((c) => !isItemTombstoned('fenix_product_categories_data', c, 'id', deletedMap)),
+      'id'
+    );
+  } catch (e) {
+    console.error('Failed to load stored categories', e);
+  }
+
+  let grps: ProductGroup[] = DEFAULT_GROUPS;
+  try {
+    const deletedMap = getDeletedIdsForCollection('fenix_product_groups_data');
+    const raw = getLocalRawSafe('fenix_product_groups_data');
+    const source = raw !== null
+      ? getLocalCollectionSafe<ProductGroup>('fenix_product_groups_data', [])
+      : DEFAULT_GROUPS;
+    grps = deduplicateListById(
+      source.filter((g) => !isItemTombstoned('fenix_product_groups_data', g, 'id', deletedMap)),
+      'id'
+    );
+  } catch (e) {
+    console.error('Failed to load stored product groups', e);
+  }
+
+  let prods: GroupProductItem[] = mergeProductCosts(DEFAULT_PRODUCTS, undefined, currentUserName);
+  try {
+    const deletedMap = getDeletedIdsForCollection('fenix_product_items_data');
+    const raw = getLocalRawSafe('fenix_product_items_data');
+    const source = raw !== null
+      ? getLocalCollectionSafe<any>('fenix_product_items_data', [])
+      : DEFAULT_PRODUCTS;
+    const itemsWithPrices = deduplicateListById(
+      source
+        .filter((item) => !isItemTombstoned('fenix_product_items_data', item, 'id', deletedMap))
+        .map(normalizeProductItemPrices),
+      'id'
+    );
+    prods = mergeProductCosts(itemsWithPrices, undefined, currentUserName);
+  } catch (e) {
+    console.error('Failed to load stored product items', e);
+  }
+
+  return { categories: cats, groups: grps, products: prods };
+}
+
 interface ProdutosScreenProps {
   currentUserName?: string;
 }
 
 export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName }) => {
   const isDirector = (currentUserName || '').toLowerCase().includes('eder');
-  const [categories, setCategories] = useState<ProductCategory[]>(() => {
-    try {
-      const deletedMap = getDeletedIdsForCollection('fenix_product_categories_data');
-      const raw = getLocalRawSafe('fenix_product_categories_data');
-      if (raw !== null) {
-        const parsed = getLocalCollectionSafe<ProductCategory>('fenix_product_categories_data', []);
-        return parsed.filter((c) => !isItemTombstoned('fenix_product_categories_data', c, 'id', deletedMap));
-      }
-      return DEFAULT_CATEGORIES.filter((c) => !isItemTombstoned('fenix_product_categories_data', c, 'id', deletedMap));
-    } catch (e) {
-      console.error('Failed to load stored categories', e);
-    }
-    return DEFAULT_CATEGORIES;
-  });
+  const shouldFetchRemoteOnMount =
+    typeof window !== 'undefined' && !isEmergencyOfflineMode() && Boolean(getSupabaseClient());
 
-  const [groups, setGroups] = useState<ProductGroup[]>(() => {
-    try {
-      const deletedMap = getDeletedIdsForCollection('fenix_product_groups_data');
-      const raw = getLocalRawSafe('fenix_product_groups_data');
-      if (raw !== null) {
-        const parsed = getLocalCollectionSafe<ProductGroup>('fenix_product_groups_data', []);
-        return parsed.filter((g) => !isItemTombstoned('fenix_product_groups_data', g, 'id', deletedMap));
-      }
-      return DEFAULT_GROUPS.filter((g) => !isItemTombstoned('fenix_product_groups_data', g, 'id', deletedMap));
-    } catch (e) {
-      console.error('Failed to load stored product groups', e);
-    }
-    return DEFAULT_GROUPS;
-  });
+  const initialFallbackRef = useRef<{
+    categories: ProductCategory[];
+    groups: ProductGroup[];
+    products: GroupProductItem[];
+  } | null>(null);
+  if (!shouldFetchRemoteOnMount && initialFallbackRef.current === null) {
+    initialFallbackRef.current = readLocalCatalogFallback(currentUserName);
+  }
 
-  const [products, setProducts] = useState<GroupProductItem[]>(() => {
-    try {
-      const deletedMap = getDeletedIdsForCollection('fenix_product_items_data');
-      const raw = getLocalRawSafe('fenix_product_items_data');
-      if (raw !== null) {
-        const parsed = getLocalCollectionSafe<any>('fenix_product_items_data', []);
-        const itemsWithPrices = parsed
-          .filter((item) => !isItemTombstoned('fenix_product_items_data', item, 'id', deletedMap))
-          .map((item: any) => {
-            const base = Number(item.priceClienteFinal ?? item.price ?? 89.90);
-            return {
-              ...item,
-              priceClienteFinal: Number(item.priceClienteFinal ?? base),
-              priceRevenda: Number(
-                item.priceRevenda ?? Math.round(base * 0.82 * 100) / 100
-              ),
-              priceConstrutora: Number(
-                item.priceConstrutora ?? Math.round(base * 0.90 * 100) / 100
-              ),
-            };
-          });
-        return mergeProductCosts(itemsWithPrices);
-      }
-      return mergeProductCosts(
-        DEFAULT_PRODUCTS.filter((p) => !isItemTombstoned('fenix_product_items_data', p, 'id', deletedMap))
-      );
-    } catch (e) {
-      console.error('Failed to load stored product items', e);
-    }
-    return mergeProductCosts(DEFAULT_PRODUCTS);
-  });
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState<boolean>(shouldFetchRemoteOnMount);
+
+  const [categories, setCategories] = useState<ProductCategory[]>(() =>
+    shouldFetchRemoteOnMount ? [] : (initialFallbackRef.current?.categories ?? DEFAULT_CATEGORIES)
+  );
+
+  const [groups, setGroups] = useState<ProductGroup[]>(() =>
+    shouldFetchRemoteOnMount ? [] : (initialFallbackRef.current?.groups ?? DEFAULT_GROUPS)
+  );
+
+  const [products, setProducts] = useState<GroupProductItem[]>(() =>
+    shouldFetchRemoteOnMount ? [] : (initialFallbackRef.current?.products ?? DEFAULT_PRODUCTS)
+  );
 
   const [searchTerm, setSearchTerm] = useState('');
   const [priceViewFilter, setPriceViewFilter] = useState<'all' | PriceTableTier>('all');
@@ -343,7 +385,7 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
   // Modal State for Deleting Product
   const [productToDelete, setProductToDelete] = useState<GroupProductItem | null>(null);
 
-  const isLoadedRef = useRef(false);
+  const isLoadedRef = useRef(!shouldFetchRemoteOnMount);
   const isSavingProductRef = useRef(false);
 
   const [isSavingCatalogAction, setIsSavingCatalogAction] = useState(false);
@@ -352,24 +394,21 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
 
   useEffect(() => subscribePendingSync(() => setPendingSyncTick((t) => t + 1)), []);
 
-  // Read initial data from Supabase with tombstone + pending-sync protection (including dedicated costs database)
+  // Read authoritative catalog directly from Supabase before rendering products (no stale-data flash or duplicate queries)
   useEffect(() => {
     let active = true;
     const client = getSupabaseClient();
     if (client && !isEmergencyOfflineMode()) {
-      Promise.all([
-        fetchSupabaseKeysIndividually(
-          [
-            DELETED_RECORDS_STORAGE_KEY,
-            'fenix_product_items_data',
-            'fenix_product_categories_data',
-            'fenix_product_groups_data',
-          ],
-          25000
-        ),
-        getAllProductCosts(currentUserName),
-      ])
-        .then(([{ rows, succeededKeys }, costsDb]) => {
+      const keysToFetch = [
+        DELETED_RECORDS_STORAGE_KEY,
+        'fenix_product_items_data',
+        'fenix_product_categories_data',
+        'fenix_product_groups_data',
+        ...(isDirector ? [KEY_PRODUCT_COSTS_DB] : []),
+      ];
+
+      fetchSupabaseKeysIndividually(keysToFetch, 25000, { maxCacheAgeMs: 2500 })
+        .then(({ rows, succeededKeys }) => {
           if (!active || isSavingProductRef.current) return;
 
           const remoteTombstones = rows.get(DELETED_RECORDS_STORAGE_KEY);
@@ -385,7 +424,37 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
                 }
               })()
             );
-            setLocalCollectionSafe(DELETED_RECORDS_STORAGE_KEY, mergedMap);
+            const serializedTombstones = JSON.stringify(mergedMap);
+            if (getLocalRawSafe(DELETED_RECORDS_STORAGE_KEY) !== serializedTombstones) {
+              setLocalCollectionSafe(DELETED_RECORDS_STORAGE_KEY, mergedMap);
+            }
+          }
+
+          let costsDb: ProductCostsMap = {};
+          if (isDirector) {
+            const localCosts = getLocalProductCosts(currentUserName);
+            const remoteCosts = rows.get(KEY_PRODUCT_COSTS_DB);
+            if (
+              succeededKeys.has(KEY_PRODUCT_COSTS_DB) &&
+              remoteCosts &&
+              typeof remoteCosts === 'object' &&
+              !Array.isArray(remoteCosts)
+            ) {
+              const mergedCosts: ProductCostsMap = { ...localCosts };
+              for (const [pId, val] of Object.entries(remoteCosts)) {
+                const numVal = Number(val);
+                if (!isNaN(numVal) && numVal > 0) {
+                  mergedCosts[pId] = Number(numVal.toFixed(2));
+                }
+              }
+              const serializedCosts = JSON.stringify(mergedCosts);
+              if (getLocalRawSafe(KEY_PRODUCT_COSTS_DB) !== serializedCosts) {
+                setLocalCollectionSafe(KEY_PRODUCT_COSTS_DB, mergedCosts);
+              }
+              costsDb = mergedCosts;
+            } else {
+              costsDb = localCosts;
+            }
           }
 
           const allPending = getPendingSyncRecords();
@@ -395,11 +464,15 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
             remoteArr: T[]
           ): T[] => {
             const deletedMap = getDeletedIdsForCollection(collectionKey);
-            const cleanRemote = remoteArr.filter(
-              (it) => !isItemTombstoned(collectionKey, it, 'id', deletedMap)
+            const cleanRemote = deduplicateListById(
+              remoteArr.filter((it) => !isItemTombstoned(collectionKey, it, 'id', deletedMap)),
+              'id'
             );
-            const localArr = getLocalCollectionSafe<T>(collectionKey, []).filter(
-              (it) => !isItemTombstoned(collectionKey, it, 'id', deletedMap)
+            const localArr = deduplicateListById(
+              getLocalCollectionSafe<T>(collectionKey, []).filter(
+                (it) => !isItemTombstoned(collectionKey, it, 'id', deletedMap)
+              ),
+              'id'
             );
             const keyPending = allPending.filter((r) => r.collectionKey === collectionKey);
             const pendingUpserts = keyPending
@@ -414,7 +487,7 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
             if (cleanRemote.length === 0 && localArr.length > 0 && pendingDeletes.size === 0 && deletedMap.size === 0) {
               result = localArr;
             } else if (hasCollectionPending && localArr.length > 0) {
-              result = safeMergeLists(localArr, cleanRemote, 'id', deletedMap);
+              result = safeMergeLists(cleanRemote, localArr, 'id', deletedMap);
             } else if (pendingUpserts.length > 0) {
               result = safeMergeLists(cleanRemote, pendingUpserts, 'id', deletedMap);
             }
@@ -422,18 +495,28 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
             if (pendingDeletes.size > 0) {
               result = result.filter((it: any) => !pendingDeletes.has(String(it?.id ?? '').trim()));
             }
-            return result;
+            return deduplicateListById(result, 'id');
           };
+
+          const fallback = readLocalCatalogFallback(currentUserName);
 
           const remoteProds = rows.get('fenix_product_items_data');
           if (succeededKeys.has('fenix_product_items_data') && Array.isArray(remoteProds)) {
             const mergedRemoteProds = mergeRemoteCollection<GroupProductItem>(
               'fenix_product_items_data',
               remoteProds
+            ).map(normalizeProductItemPrices);
+            const merged = deduplicateListById(
+              mergeProductCosts(mergedRemoteProds, costsDb, currentUserName),
+              'id'
             );
-            const merged = mergeProductCosts(mergedRemoteProds, costsDb, currentUserName);
             setProducts(merged);
-            setLocalCollectionSafe('fenix_product_items_data', merged);
+            const serialized = JSON.stringify(merged);
+            if (getLocalRawSafe('fenix_product_items_data') !== serialized) {
+              setLocalCollectionSafe('fenix_product_items_data', merged);
+            }
+          } else {
+            setProducts(fallback.products);
           }
 
           const remoteCats = rows.get('fenix_product_categories_data');
@@ -443,7 +526,12 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
               remoteCats
             );
             setCategories(mergedCats);
-            setLocalCollectionSafe('fenix_product_categories_data', mergedCats);
+            const serialized = JSON.stringify(mergedCats);
+            if (getLocalRawSafe('fenix_product_categories_data') !== serialized) {
+              setLocalCollectionSafe('fenix_product_categories_data', mergedCats);
+            }
+          } else {
+            setCategories(fallback.categories);
           }
 
           const remoteGroups = rows.get('fenix_product_groups_data');
@@ -453,39 +541,68 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
               remoteGroups
             );
             setGroups(mergedGroups);
-            setLocalCollectionSafe('fenix_product_groups_data', mergedGroups);
+            const serialized = JSON.stringify(mergedGroups);
+            if (getLocalRawSafe('fenix_product_groups_data') !== serialized) {
+              setLocalCollectionSafe('fenix_product_groups_data', mergedGroups);
+            }
+          } else {
+            setGroups(fallback.groups);
           }
 
           invalidateProductCatalogCache();
           isLoadedRef.current = true;
+          setIsLoadingCatalog(false);
         })
         .catch(() => {
+          if (!active) return;
+          const fallback = readLocalCatalogFallback(currentUserName);
+          setCategories(fallback.categories);
+          setGroups(fallback.groups);
+          setProducts(fallback.products);
           isLoadedRef.current = true;
+          setIsLoadingCatalog(false);
         });
     } else {
+      const fallback = readLocalCatalogFallback(currentUserName);
+      setCategories(fallback.categories);
+      setGroups(fallback.groups);
+      setProducts(fallback.products);
       isLoadedRef.current = true;
+      setIsLoadingCatalog(false);
     }
     return () => {
       active = false;
     };
-  }, []);
+  }, [currentUserName, isDirector]);
 
-  // Listen to remote updates from Supabase sync (debounced and guarded against editing flicker)
+  // Listen to remote updates from Supabase sync (debounced and guarded against initial load / editing flicker)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handleProductsUpdated = () => {
-      if (isSavingProductRef.current) return;
+    const handleProductsUpdated = (event?: Event) => {
+      if (!isLoadedRef.current || isSavingProductRef.current) return;
+      if (
+        typeof StorageEvent !== 'undefined' &&
+        event instanceof StorageEvent &&
+        event.key &&
+        !event.key.includes('product') &&
+        event.key !== DELETED_RECORDS_STORAGE_KEY
+      ) {
+        return;
+      }
 
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        if (isSavingProductRef.current) return;
+        if (!isLoadedRef.current || isSavingProductRef.current) return;
         try {
           if (getLocalRawSafe('fenix_product_items_data') !== null) {
             const delProds = getDeletedIdsForCollection('fenix_product_items_data');
-            const parsedProds = getLocalCollectionSafe<GroupProductItem>('fenix_product_items_data', []).filter(
-              (p) => !isItemTombstoned('fenix_product_items_data', p, 'id', delProds)
+            const parsedProds = deduplicateListById(
+              getLocalCollectionSafe<GroupProductItem>('fenix_product_items_data', [])
+                .filter((p) => !isItemTombstoned('fenix_product_items_data', p, 'id', delProds))
+                .map(normalizeProductItemPrices),
+              'id'
             );
-            const merged = mergeProductCosts(parsedProds);
+            const merged = mergeProductCosts(parsedProds, undefined, currentUserName);
             setProducts((prev) => {
               if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
               return merged;
@@ -493,8 +610,11 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
           }
           if (getLocalRawSafe('fenix_product_categories_data') !== null) {
             const delCats = getDeletedIdsForCollection('fenix_product_categories_data');
-            const parsedCats = getLocalCollectionSafe<ProductCategory>('fenix_product_categories_data', []).filter(
-              (c) => !isItemTombstoned('fenix_product_categories_data', c, 'id', delCats)
+            const parsedCats = deduplicateListById(
+              getLocalCollectionSafe<ProductCategory>('fenix_product_categories_data', []).filter(
+                (c) => !isItemTombstoned('fenix_product_categories_data', c, 'id', delCats)
+              ),
+              'id'
             );
             setCategories((prev) => {
               if (JSON.stringify(prev) === JSON.stringify(parsedCats)) return prev;
@@ -503,8 +623,11 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
           }
           if (getLocalRawSafe('fenix_product_groups_data') !== null) {
             const delGrps = getDeletedIdsForCollection('fenix_product_groups_data');
-            const parsedGrps = getLocalCollectionSafe<ProductGroup>('fenix_product_groups_data', []).filter(
-              (g) => !isItemTombstoned('fenix_product_groups_data', g, 'id', delGrps)
+            const parsedGrps = deduplicateListById(
+              getLocalCollectionSafe<ProductGroup>('fenix_product_groups_data', []).filter(
+                (g) => !isItemTombstoned('fenix_product_groups_data', g, 'id', delGrps)
+              ),
+              'id'
             );
             setGroups((prev) => {
               if (JSON.stringify(prev) === JSON.stringify(parsedGrps)) return prev;
@@ -527,7 +650,7 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
       window.removeEventListener(EVENT_PRODUCT_COSTS_UPDATED, handleProductsUpdated);
       window.removeEventListener('storage', handleProductsUpdated);
     };
-  }, []);
+  }, [currentUserName]);
 
   // Save expanded categories to localStorage
   useEffect(() => {
@@ -1811,6 +1934,13 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
         </div>
       </div>
 
+      {isLoadingCatalog ? (
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm py-16 px-6 flex flex-col items-center justify-center gap-3 text-slate-500">
+          <Loader2 className="w-6 h-6 animate-spin text-[#0057ff]" />
+          <span className="text-sm font-medium text-slate-600">Carregando produtos atualizados...</span>
+        </div>
+      ) : (
+      <>
       {/* Categorias e Grupos - Toolbar de Ações Principais */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
         <div>
@@ -2571,6 +2701,8 @@ export const ProdutosScreen: React.FC<ProdutosScreenProps> = ({ currentUserName 
           );
         })}
       </div>
+      </>
+      )}
 
       {/* ======================================================== */}
       {/* MODAL: EDITAR PRODUTO & ATRIBUIÇÃO (CATEGORIA, GRUPO, PREÇOS) */}

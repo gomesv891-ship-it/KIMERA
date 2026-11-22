@@ -1,4 +1,4 @@
-import { toBlob, toPng } from 'html-to-image';
+import { getFontEmbedCSS, toBlob, toPng } from 'html-to-image';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { runWithPdfThemeExport } from './themeService';
@@ -7,6 +7,43 @@ export interface EspelhoCaptureResult {
   pngDataUrl: string;
   width: number;
   height: number;
+}
+
+let cachedFontEmbedCss: string | null = null;
+let inFlightFontEmbedCssPromise: Promise<string | null> | null = null;
+
+async function resolveCachedFontEmbedCss(element: HTMLElement): Promise<string | null> {
+  if (cachedFontEmbedCss !== null) {
+    return cachedFontEmbedCss;
+  }
+  if (inFlightFontEmbedCssPromise) {
+    return inFlightFontEmbedCssPromise;
+  }
+
+  inFlightFontEmbedCssPromise = (async () => {
+    try {
+      const css = await Promise.race<string | null>([
+        getFontEmbedCSS(element, { preferredFontFormat: 'woff2' }),
+        new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1200)),
+      ]);
+      cachedFontEmbedCss = typeof css === 'string' ? css : '';
+      return cachedFontEmbedCss;
+    } catch {
+      cachedFontEmbedCss = '';
+      return '';
+    } finally {
+      inFlightFontEmbedCssPromise = null;
+    }
+  })();
+
+  return inFlightFontEmbedCssPromise;
+}
+
+export function warmEspelhoFontCache(element?: HTMLElement | null): void {
+  if (typeof window === 'undefined' || cachedFontEmbedCss !== null) return;
+  const target = element || document.getElementById('espelho-oficial-orcamento');
+  if (!target) return;
+  void resolveCachedFontEmbedCss(target);
 }
 
 async function waitForVisualSettlement(): Promise<void> {
@@ -160,13 +197,18 @@ export async function captureEspelhoToBlob(
     await waitForVisualSettlement();
   } else if (typeof document !== 'undefined' && document.fonts?.status !== 'loaded' && document.fonts?.ready) {
     try {
-      await document.fonts.ready;
+      await Promise.race([
+        document.fonts.ready,
+        new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
+      ]);
     } catch {
       // ignore font loading error
     }
   }
 
   const { captureWidth, captureHeight, captureStyle } = getCaptureMetrics(element);
+  const cachedCss = await resolveCachedFontEmbedCss(element);
+  const fontOptions = cachedCss ? { fontEmbedCSS: cachedCss } : { skipFonts: true };
 
   try {
     const blob = await toBlob(element, {
@@ -179,44 +221,47 @@ export async function captureEspelhoToBlob(
       canvasWidth: captureWidth * 2,
       canvasHeight: captureHeight * 2,
       style: captureStyle,
+      ...fontOptions,
     });
     if (blob) {
       return { blob, width: captureWidth, height: captureHeight };
     }
     throw new Error('Blob vazio ao capturar imagem');
   } catch (errWithFonts) {
-    try {
-      const blob = await toBlob(element, {
-        quality: 1.0,
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        cacheBust: false,
-        skipFonts: true,
-        width: captureWidth,
-        height: captureHeight,
-        canvasWidth: captureWidth * 2,
-        canvasHeight: captureHeight * 2,
-        style: captureStyle,
-      });
-      if (blob) {
-        return { blob, width: captureWidth, height: captureHeight };
+    if (cachedCss) {
+      try {
+        const blob = await toBlob(element, {
+          quality: 1.0,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          cacheBust: false,
+          skipFonts: true,
+          width: captureWidth,
+          height: captureHeight,
+          canvasWidth: captureWidth * 2,
+          canvasHeight: captureHeight * 2,
+          style: captureStyle,
+        });
+        if (blob) {
+          return { blob, width: captureWidth, height: captureHeight };
+        }
+      } catch {
+        // fallback below
       }
-      throw new Error('Blob vazio sem fontes ao capturar imagem');
-    } catch (errSkipFonts) {
-      console.warn('toBlob falhou, utilizando fallback html2canvas:', errWithFonts, errSkipFonts);
-      const canvas = await renderElementViaHtml2Canvas(element, captureWidth, captureHeight);
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (result) => {
-            if (result) resolve(result);
-            else reject(new Error('Falha ao converter canvas em PNG'));
-          },
-          'image/png',
-          1.0
-        );
-      });
-      return { blob, width: captureWidth, height: captureHeight };
     }
+    console.warn('toBlob falhou, utilizando fallback html2canvas:', errWithFonts);
+    const canvas = await renderElementViaHtml2Canvas(element, captureWidth, captureHeight);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (result) => {
+          if (result) resolve(result);
+          else reject(new Error('Falha ao converter canvas em PNG'));
+        },
+        'image/png',
+        1.0
+      );
+    });
+    return { blob, width: captureWidth, height: captureHeight };
   }
 }
 
@@ -224,6 +269,8 @@ export async function captureEspelhoToPng(element: HTMLElement): Promise<Espelho
   await waitForVisualSettlement();
 
   const { captureWidth, captureHeight, captureStyle } = getCaptureMetrics(element);
+  const cachedCss = await resolveCachedFontEmbedCss(element);
+  const fontOptions = cachedCss ? { fontEmbedCSS: cachedCss } : { skipFonts: true };
 
   try {
     const pngDataUrl = await toPng(element, {
@@ -236,32 +283,36 @@ export async function captureEspelhoToPng(element: HTMLElement): Promise<Espelho
       canvasWidth: captureWidth * 2,
       canvasHeight: captureHeight * 2,
       style: captureStyle,
+      ...fontOptions,
     });
     return { pngDataUrl, width: captureWidth, height: captureHeight };
   } catch (errWithFonts) {
-    try {
-      const pngDataUrl = await toPng(element, {
-        quality: 1.0,
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        cacheBust: false,
-        skipFonts: true,
-        width: captureWidth,
-        height: captureHeight,
-        canvasWidth: captureWidth * 2,
-        canvasHeight: captureHeight * 2,
-        style: captureStyle,
-      });
-      return { pngDataUrl, width: captureWidth, height: captureHeight };
-    } catch (errSkipFonts) {
-      console.warn('toPng falhou, utilizando fallback html2canvas:', errWithFonts, errSkipFonts);
-      const canvas = await renderElementViaHtml2Canvas(element, captureWidth, captureHeight);
-      return {
-        pngDataUrl: canvas.toDataURL('image/png'),
-        width: captureWidth,
-        height: captureHeight,
-      };
+    if (cachedCss) {
+      try {
+        const pngDataUrl = await toPng(element, {
+          quality: 1.0,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          cacheBust: false,
+          skipFonts: true,
+          width: captureWidth,
+          height: captureHeight,
+          canvasWidth: captureWidth * 2,
+          canvasHeight: captureHeight * 2,
+          style: captureStyle,
+        });
+        return { pngDataUrl, width: captureWidth, height: captureHeight };
+      } catch {
+        // fallback below
+      }
     }
+    console.warn('toPng falhou, utilizando fallback html2canvas:', errWithFonts);
+    const canvas = await renderElementViaHtml2Canvas(element, captureWidth, captureHeight);
+    return {
+      pngDataUrl: canvas.toDataURL('image/png'),
+      width: captureWidth,
+      height: captureHeight,
+    };
   }
 }
 
@@ -301,7 +352,7 @@ function triggerDataUrlDownload(href: string, filename: string): void {
   document.body.removeChild(link);
 }
 
-function triggerBlobDownload(blob: Blob, filename: string): void {
+export function triggerBlobDownload(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
   triggerDataUrlDownload(objectUrl, filename);
   window.setTimeout(() => {
@@ -312,9 +363,11 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
 export async function exportEspelhoToImage(
   element: HTMLElement,
   filename: string,
-  format: 'png' | 'jpg' = 'png'
+  format: 'png' | 'jpg' = 'png',
+  preCapturedBlob?: Blob | null
 ): Promise<void> {
-  const { blob } = await captureEspelhoToBlob(element, { skipSettlementDelay: true });
+  const blob =
+    preCapturedBlob || (await captureEspelhoToBlob(element, { skipSettlementDelay: true })).blob;
   if (format === 'jpg') {
     const objectUrl = URL.createObjectURL(blob);
     try {

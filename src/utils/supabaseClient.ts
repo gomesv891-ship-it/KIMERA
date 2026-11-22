@@ -1449,6 +1449,7 @@ export function initSupabaseRealtimeSubscription(): (() => void) | null {
             if (updatedAt) {
               setKnownRemoteUpdatedAt(key, String(updatedAt));
             }
+            sessionVerifiedKeys.add(key);
             if (isRecentSelfSave(key, updatedAt)) {
               return;
             }
@@ -1536,22 +1537,37 @@ export function initSupabaseRealtimeSubscription(): (() => void) | null {
                 }
                 const cleanRemote = parsedData.filter((it) => !isItemTombstoned(key, it, 'id', deletedMap));
                 const cleanLocal = localList.filter((it) => !isItemTombstoned(key, it, 'id', deletedMap));
-                let merged =
-                  key === 'fenix_clients_db'
-                    ? mergeClientsPreservingNewFirst(cleanRemote, cleanLocal, new Set(deletedMap.keys()))
-                    : key === 'fenix_followup_cards_v2'
-                    ? mergeFollowUpArraysSafe(cleanRemote, cleanLocal)
-                    : safeMergeLists(cleanRemote, cleanLocal, 'id');
-
                 const pendingUpserts = pendingRecs.filter((r) => r.op === 'upsert' && r.item);
-                if (pendingUpserts.length > 0) {
-                  merged = mergeItemsIntoCollection(
+                const pendingDeletes = new Set(pendingRecs.filter((r) => r.op === 'delete').map((r) => r.itemId));
+
+                let merged: any[];
+                if (PRODUCT_CATALOG_AUTHORITATIVE_KEYS.has(key)) {
+                  merged = mergeAuthoritativeCatalogCollection(
                     key,
-                    merged,
-                    [],
+                    cleanRemote,
+                    cleanLocal,
+                    pendingRecs,
                     pendingUpserts.map((u) => u.item),
-                    pendingUpserts[0].idField || 'id'
-                  ).updatedList;
+                    pendingDeletes,
+                    deletedMap
+                  );
+                } else {
+                  merged =
+                    key === 'fenix_clients_db'
+                      ? mergeClientsPreservingNewFirst(cleanRemote, cleanLocal, new Set(deletedMap.keys()))
+                      : key === 'fenix_followup_cards_v2'
+                      ? mergeFollowUpArraysSafe(cleanRemote, cleanLocal)
+                      : safeMergeLists(cleanRemote, cleanLocal, 'id');
+
+                  if (pendingUpserts.length > 0) {
+                    merged = mergeItemsIntoCollection(
+                      key,
+                      merged,
+                      [],
+                      pendingUpserts.map((u) => u.item),
+                      pendingUpserts[0].idField || 'id'
+                    ).updatedList;
+                  }
                 }
                 const stringVal = JSON.stringify(merged);
                 if (currentLocalRaw !== stringVal) {
@@ -1677,6 +1693,47 @@ const APPEND_NEW_ITEM_COLLECTIONS = new Set<string>([
   'fenix_estoque_groups',
 ]);
 
+const PRODUCT_CATALOG_AUTHORITATIVE_KEYS = new Set<string>([
+  'fenix_product_items_data',
+  'fenix_product_categories_data',
+  'fenix_product_groups_data',
+]);
+
+function mergeAuthoritativeCatalogCollection(
+  key: string,
+  cleanRemote: any[],
+  cleanLocal: any[],
+  pendingRecs: PendingOfflineRecord[],
+  pendingUpsertItems: any[],
+  pendingDeletes: Set<string>,
+  deletedMap: Map<string, number>
+): any[] {
+  const hasCollectionPending = pendingRecs.some((r) => r.op === 'collection');
+  let result: any[];
+
+  if (cleanRemote.length === 0 && cleanLocal.length > 0 && pendingDeletes.size === 0 && deletedMap.size === 0) {
+    result = cleanLocal;
+  } else if (hasCollectionPending && cleanLocal.length > 0) {
+    result = safeMergeLists(cleanRemote, cleanLocal, 'id', deletedMap);
+  } else {
+    result = cleanRemote;
+  }
+
+  if (pendingUpsertItems.length > 0) {
+    const idF = pendingRecs.find((r) => r.op === 'upsert')?.idField || 'id';
+    result = mergeItemsIntoCollection(key, result, [], pendingUpsertItems, idF).updatedList;
+  }
+
+  if (pendingDeletes.size > 0) {
+    result = result.filter((it: any) => {
+      const xId = extractCollectionItemId(it);
+      return !xId || !pendingDeletes.has(xId);
+    });
+  }
+
+  return deduplicateListById(result, 'id');
+}
+
 function mergeFollowUpArraysSafe(primaryList: any[], secondaryList: any[]): any[] {
   const fupByRef = new Map<string, any>();
   for (const p of [...primaryList, ...secondaryList]) {
@@ -1730,6 +1787,7 @@ function mergeFollowUpArraysSafe(primaryList: any[], secondaryList: any[]): any[
 
 const inFlightKeyPromises = new Map<string, Promise<{ ok: boolean; hasData: boolean; data?: any }>>();
 const recentKeyFetchCache = new Map<string, { hasData: boolean; data?: any; fetchedAt: number }>();
+const sessionVerifiedKeys = new Set<string>();
 const KEY_FETCH_CACHE_TTL_MS = 15000;
 
 let activeReadSlots = 0;
@@ -1764,6 +1822,7 @@ export function primeSupabaseKeyCache(key: string, data: any, remoteUpdatedAt?: 
     data,
     fetchedAt: Date.now(),
   });
+  sessionVerifiedKeys.add(key);
   if (remoteUpdatedAt) {
     setKnownRemoteUpdatedAt(key, remoteUpdatedAt);
   }
@@ -1772,12 +1831,14 @@ export function primeSupabaseKeyCache(key: string, data: any, remoteUpdatedAt?: 
 /**
  * Busca chaves específicas diretamente no Supabase com:
  * - deduplicação in-flight e cache curto (15s, invalidado automaticamente pelo Realtime/saves)
+ * - verificação leve por `updated_at` (~30 bytes) antes de baixar coleções JSONB pesadas
  * - semáforo de concorrência para não esgotar conexões do banco
  * - AbortController único sem retentativas órfãs após timeout
  */
 export async function fetchSupabaseKeysIndividually(
   keys: string[],
-  timeoutMs = 20000
+  timeoutMs = 20000,
+  options?: { maxCacheAgeMs?: number; skipVersionCheck?: boolean }
 ): Promise<{
   rows: Map<string, any>;
   succeededKeys: Set<string>;
@@ -1798,12 +1859,13 @@ export async function fetchSupabaseKeysIndividually(
 
   const uniqueKeys = Array.from(new Set(keys.filter(Boolean)));
   const now = Date.now();
+  const maxCacheAgeMs = options?.maxCacheAgeMs ?? KEY_FETCH_CACHE_TTL_MS;
   const keysToFetch: string[] = [];
   const waitPromises: Array<{ key: string; promise: Promise<{ ok: boolean; hasData: boolean; data?: any }> }> = [];
 
   for (const k of uniqueKeys) {
     const cached = recentKeyFetchCache.get(k);
-    if (cached && now - cached.fetchedAt < KEY_FETCH_CACHE_TTL_MS) {
+    if (cached && now - cached.fetchedAt < maxCacheAgeMs) {
       succeededKeys.add(k);
       if (cached.hasData) {
         rows.set(k, cached.data);
@@ -1820,17 +1882,6 @@ export async function fetchSupabaseKeysIndividually(
     keysToFetch.push(k);
   }
 
-  const heavyKeys = keysToFetch.filter((k) => HEAVY_COLLECTION_KEYS.has(k));
-  const lightKeys = keysToFetch.filter((k) => !HEAVY_COLLECTION_KEYS.has(k));
-
-  const queryBatches: string[][] = [];
-  for (const hk of heavyKeys) {
-    queryBatches.push([hk]);
-  }
-  for (let i = 0; i < lightKeys.length; i += 5) {
-    queryBatches.push(lightKeys.slice(i, i + 5));
-  }
-
   const resolvers = new Map<string, (val: { ok: boolean; hasData: boolean; data?: any }) => void>();
   for (const k of keysToFetch) {
     const p = new Promise<{ ok: boolean; hasData: boolean; data?: any }>((resolve) => {
@@ -1842,6 +1893,7 @@ export async function fetchSupabaseKeysIndividually(
   const resolveKey = (k: string, result: { ok: boolean; hasData: boolean; data?: any }) => {
     inFlightKeyPromises.delete(k);
     if (result.ok) {
+      sessionVerifiedKeys.add(k);
       recentKeyFetchCache.set(k, { hasData: result.hasData, data: result.data, fetchedAt: Date.now() });
       succeededKeys.add(k);
       if (result.hasData) {
@@ -1853,6 +1905,97 @@ export async function fetchSupabaseKeysIndividually(
     const r = resolvers.get(k);
     if (r) r(result);
   };
+
+  // Verificação leve por updated_at (~30 bytes/chave) antes de baixar JSONB completo
+  const pendingKeySet = new Set<string>(getPendingSyncRecords().map((r) => r.collectionKey));
+  const versionCheckCandidates: string[] = [];
+  const fullFetchKeys: string[] = [];
+
+  for (const k of keysToFetch) {
+    const canVersionCheck =
+      !options?.skipVersionCheck &&
+      remoteUpdatedAtCache.has(k) &&
+      getLocalRawSafe(k) !== null &&
+      !collectionWriteQueues.has(k) &&
+      !pendingKeySet.has(k) &&
+      (!PRODUCT_CATALOG_AUTHORITATIVE_KEYS.has(k) || sessionVerifiedKeys.has(k));
+
+    if (canVersionCheck) {
+      versionCheckCandidates.push(k);
+    } else {
+      fullFetchKeys.push(k);
+    }
+  }
+
+  if (versionCheckCandidates.length > 0) {
+    try {
+      const metaRows = await withSupabaseReadSlot(() =>
+        withAbortableTimeout<any>(
+          (signal) =>
+            client
+              .from('fenix_kv_store')
+              .select('key, updated_at')
+              .in('key', versionCheckCandidates)
+              .abortSignal(signal),
+          Math.min(10000, timeoutMs),
+          'Tempo limite ao verificar versão das coleções no Supabase.'
+        )
+      );
+
+      if (!metaRows?.error && Array.isArray(metaRows?.data)) {
+        const metaMap = new Map<string, string>();
+        for (const mRow of metaRows.data) {
+          if (mRow && mRow.key && mRow.updated_at) {
+            metaMap.set(mRow.key, String(mRow.updated_at));
+          }
+        }
+
+        for (const k of versionCheckCandidates) {
+          const remoteTs = metaMap.get(k);
+          const knownTs = remoteUpdatedAtCache.get(k);
+          if (!remoteTs) {
+            // Chave ainda não existe ou foi removida no servidor — confirma via busca completa
+            fullFetchKeys.push(k);
+            continue;
+          }
+
+          if (knownTs && areTimestampsEqual(remoteTs, knownTs)) {
+            const localRaw = getLocalRawSafe(k);
+            if (localRaw !== null) {
+              try {
+                const cachedArr = parsedCollectionCache.get(k);
+                const parsedLocal =
+                  cachedArr && cachedArr.raw === localRaw
+                    ? [...cachedArr.parsed]
+                    : JSON.parse(localRaw);
+                resolveKey(k, { ok: true, hasData: true, data: parsedLocal });
+                continue;
+              } catch {
+                // fallback para busca completa se o cache local estiver corrompido
+              }
+            }
+          }
+
+          fullFetchKeys.push(k);
+        }
+      } else {
+        fullFetchKeys.push(...versionCheckCandidates);
+      }
+    } catch {
+      fullFetchKeys.push(...versionCheckCandidates);
+    }
+  }
+
+  const heavyKeys = fullFetchKeys.filter((k) => HEAVY_COLLECTION_KEYS.has(k));
+  const lightKeys = fullFetchKeys.filter((k) => !HEAVY_COLLECTION_KEYS.has(k));
+
+  const queryBatches: string[][] = [];
+  for (const hk of heavyKeys) {
+    queryBatches.push([hk]);
+  }
+  for (let i = 0; i < lightKeys.length; i += 5) {
+    queryBatches.push(lightKeys.slice(i, i + 5));
+  }
 
   const fetchBatch = async (batch: string[]) => {
     try {
@@ -2046,7 +2189,8 @@ export async function syncModuleData(tabName: string, force = false): Promise<vo
   }
 
   const now = Date.now();
-  if (!force && moduleLastSyncTime[tabName] && now - moduleLastSyncTime[tabName] < 15000) {
+  const throttleMs = activeRealtimeChannel ? 25000 : 15000;
+  if (!force && moduleLastSyncTime[tabName] && now - moduleLastSyncTime[tabName] < throttleMs) {
     return;
   }
 
@@ -2282,6 +2426,16 @@ export async function pullDataFromSupabase(
               [...pendingUpsertItems, ...cleanRemote],
               cleanLocal,
               new Set(deletedMap.keys())
+            );
+          } else if (PRODUCT_CATALOG_AUTHORITATIVE_KEYS.has(key)) {
+            finalData = mergeAuthoritativeCatalogCollection(
+              key,
+              cleanRemote,
+              cleanLocal,
+              keyIdbPending,
+              pendingUpsertItems,
+              pendingDeletes,
+              deletedMap
             );
           } else {
             let merged = safeMergeLists(cleanRemote, cleanLocal, 'id');
@@ -4337,39 +4491,55 @@ export async function pullAndMergeFromSupabaseSafe(): Promise<{
           const locArr = (Array.isArray(localParsed) ? localParsed : []).filter(
             (it) => !isItemTombstoned(key, it, 'id', deletedMap)
           );
-          if (remData.length === 0 && locArr.length > 0) {
-            mergedData = locArr;
-          } else if (key === 'fenix_followup_cards_v2') {
-            mergedData = mergeFollowUpArraysSafe(cleanRem, locArr);
-          } else if (key === 'fenix_clients_db') {
-            mergedData = mergeClientsPreservingNewFirst(cleanRem, locArr, new Set(deletedMap.keys()));
-          } else {
-            mergedData = safeMergeLists(cleanRem, locArr, 'id');
-          }
-
-          // Garante prevalência absoluta de alterações pendentes offline
-          const pendingUpserts = pendingRecs.filter((r) => r.op === 'upsert' && r.item);
-          if (pendingUpserts.length > 0) {
-            const idF = pendingUpserts[0].idField || 'id';
-            mergedData = mergeItemsIntoCollection(
-              key,
-              mergedData,
-              [],
-              pendingUpserts.map((u) => u.item),
-              idF
-            ).updatedList;
-          }
+          const pendingUpsertItems = pendingRecs
+            .filter((r) => r.op === 'upsert' && r.item)
+            .map((r) => r.item);
           const pendingDeletes = new Set(
             pendingRecs.filter((r) => r.op === 'delete').map((d) => d.itemId)
           );
-          if (pendingDeletes.size > 0) {
-            const idF = pendingRecs[0]?.idField || 'id';
-            mergedData = mergedData.filter(
-              (it: any) =>
-                !pendingDeletes.has(
-                  String(it?.[idF] ?? it?.id ?? it?._id ?? it?.idOrcamento ?? it?.pedido ?? '').trim()
-                )
+
+          if (PRODUCT_CATALOG_AUTHORITATIVE_KEYS.has(key)) {
+            mergedData = mergeAuthoritativeCatalogCollection(
+              key,
+              cleanRem,
+              locArr,
+              pendingRecs,
+              pendingUpsertItems,
+              pendingDeletes,
+              deletedMap
             );
+          } else {
+            if (remData.length === 0 && locArr.length > 0) {
+              mergedData = locArr;
+            } else if (key === 'fenix_followup_cards_v2') {
+              mergedData = mergeFollowUpArraysSafe(cleanRem, locArr);
+            } else if (key === 'fenix_clients_db') {
+              mergedData = mergeClientsPreservingNewFirst(cleanRem, locArr, new Set(deletedMap.keys()));
+            } else {
+              mergedData = safeMergeLists(cleanRem, locArr, 'id');
+            }
+
+            // Garante prevalência absoluta de alterações pendentes offline
+            const pendingUpserts = pendingRecs.filter((r) => r.op === 'upsert' && r.item);
+            if (pendingUpserts.length > 0) {
+              const idF = pendingUpserts[0].idField || 'id';
+              mergedData = mergeItemsIntoCollection(
+                key,
+                mergedData,
+                [],
+                pendingUpserts.map((u) => u.item),
+                idF
+              ).updatedList;
+            }
+            if (pendingDeletes.size > 0) {
+              const idF = pendingRecs[0]?.idField || 'id';
+              mergedData = mergedData.filter(
+                (it: any) =>
+                  !pendingDeletes.has(
+                    String(it?.[idF] ?? it?.id ?? it?._id ?? it?.idOrcamento ?? it?.pedido ?? '').trim()
+                  )
+              );
+            }
           }
         }
 

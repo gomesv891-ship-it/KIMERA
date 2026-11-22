@@ -61,6 +61,7 @@ import {
   getVisibleNotesForUser,
   normalizeAnotacaoUserKey,
   parseAnotacoesDatabase,
+  readCachedAnotacoesDb,
   saveAnotacaoInDb,
   saveUserCategoriesInDb,
   saveUserSheetConfigInDb,
@@ -87,6 +88,7 @@ import {
 
 interface AnotacoesScreenProps {
   currentUserName: string;
+  isActive?: boolean;
 }
 
 type HistorySnapshot = {
@@ -135,7 +137,13 @@ function cloneNote(note: AnotacaoItem): AnotacaoItem {
   };
 }
 
-export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserName }) => {
+export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({
+  currentUserName,
+  isActive = true,
+}) => {
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+
   const currentUserKey: AnotacaoUserKey = useMemo(
     () => normalizeAnotacaoUserKey(currentUserName),
     [currentUserName]
@@ -146,24 +154,48 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
   );
   const otherFirstName = getAnotacaoUserFirstName(otherUserKey);
 
-  // Estado oficial vindo do Supabase
-  const [notes, setNotes] = useState<AnotacaoItem[]>([]);
+  const initialDbRef = useRef<ReturnType<typeof readCachedAnotacoesDb> | undefined>(undefined);
+  if (initialDbRef.current === undefined) {
+    initialDbRef.current = readCachedAnotacoesDb();
+  }
+  const initialDb = initialDbRef.current;
+
+  // Estado oficial vindo do Supabase (com pré-carga segura em cache para abertura instantânea)
+  const [notes, setNotes] = useState<AnotacaoItem[]>(() => initialDb?.notes ?? []);
   const [categoriesByUser, setCategoriesByUser] = useState<
     Record<AnotacaoUserKey, AnotacaoCategory[]>
-  >({
-    vanessa: [],
-    jhessica: [],
-  });
+  >(() =>
+    initialDb?.categoriesByUser ?? {
+      vanessa: [],
+      jhessica: [],
+    }
+  );
   const [sheetConfigByUser, setSheetConfigByUser] = useState<
     Record<AnotacaoUserKey, AnotacaoSheetConfig>
-  >({
-    vanessa: { ...DEFAULT_SHEET_CONFIG },
-    jhessica: { ...DEFAULT_SHEET_CONFIG },
-  });
+  >(() =>
+    initialDb?.sheetConfigByUser ?? {
+      vanessa: { ...DEFAULT_SHEET_CONFIG },
+      jhessica: { ...DEFAULT_SHEET_CONFIG },
+    }
+  );
 
   // Navegação & seleção
-  const [selectedFolderId, setSelectedFolderId] = useState<string>('');
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>(() => {
+    if (!initialDb) return '';
+    const cats = initialDb.categoriesByUser[currentUserKey] || [];
+    const { owned, sharedWithMe } = getVisibleNotesForUser(initialDb.notes, currentUserKey);
+    const firstOwned = owned.find((n) => n.categoryId === cats[0]?.id) || owned[0];
+    if (firstOwned) return firstOwned.categoryId;
+    if (sharedWithMe[0]) return SHARED_SECTION_ID;
+    return cats[0]?.id || '';
+  });
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(() => {
+    if (!initialDb) return null;
+    const cats = initialDb.categoriesByUser[currentUserKey] || [];
+    const { owned, sharedWithMe } = getVisibleNotesForUser(initialDb.notes, currentUserKey);
+    const firstOwned = owned.find((n) => n.categoryId === cats[0]?.id) || owned[0];
+    return firstOwned?.id || sharedWithMe[0]?.id || null;
+  });
   const [draftNote, setDraftNote] = useState<AnotacaoItem | null>(null);
   const [isNewDraft, setIsNewDraft] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -172,7 +204,8 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Status & Feedback
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !initialDb);
+  const [isSyncingBackground, setIsSyncingBackground] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -350,6 +383,7 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
       if (silent && isLoadingDbRef.current) return;
       isLoadingDbRef.current = true;
       if (!silent) setIsLoading(true);
+      else setIsSyncingBackground(true);
       setErrorBanner(null);
 
       try {
@@ -376,6 +410,13 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
 
       setDraftNote((prevDraft) => {
         if (!prevDraft) return null;
+        if (hasUnsavedRef.current) {
+          const ownerCats = db.categoriesByUser[prevDraft.ownerKey] || [];
+          if (ownerCats.length > 0 && !ownerCats.some((c) => c.id === prevDraft.categoryId)) {
+            return { ...prevDraft, categoryId: ownerCats[0].id };
+          }
+          return prevDraft;
+        }
         const ownerCats = db.categoriesByUser[prevDraft.ownerKey] || [];
         if (ownerCats.length > 0 && !ownerCats.some((c) => c.id === prevDraft.categoryId)) {
           return { ...prevDraft, categoryId: ownerCats[0].id };
@@ -401,13 +442,14 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
       });
       } finally {
         isLoadingDbRef.current = false;
+        setIsSyncingBackground(false);
       }
     },
     [currentUserKey]
   );
 
   useEffect(() => {
-    loadDatabase(false);
+    loadDatabase(Boolean(initialDbRef.current));
   }, [loadDatabase]);
 
   // Realtime sync via Supabase (fenix_anotacoes_realtime_updated) e retorno de foco / polling silencioso
@@ -452,7 +494,7 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
     };
 
     const handleWindowFocus = () => {
-      if (document.visibilityState === 'visible' && !hasUnsavedRef.current) {
+      if (isActiveRef.current && document.visibilityState === 'visible' && !hasUnsavedRef.current) {
         const now = Date.now();
         if (now - lastFocusSyncAtRef.current < 30000) return;
         lastFocusSyncAtRef.current = now;
@@ -461,7 +503,7 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
     };
 
     const syncInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && !hasUnsavedRef.current) {
+      if (isActiveRef.current && document.visibilityState === 'visible' && !hasUnsavedRef.current) {
         lastFocusSyncAtRef.current = Date.now();
         loadDatabase(true);
       }
@@ -1400,7 +1442,7 @@ export const AnotacoesScreen: React.FC<AnotacoesScreenProps> = ({ currentUserNam
               title="Atualizar dados do Supabase"
               className="inline-flex items-center justify-center p-2 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isLoading || isSyncingBackground ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>

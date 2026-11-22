@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense, ReactNode } from 'react';
 import { LoginForm } from './components/LoginForm';
 import { ClientRecord, SavedOrcamento } from './types';
 import { getStoredAccounts, isEderPerez, isUserRevoked, fetchAccountsFromSupabase } from './utils/auth';
@@ -15,6 +15,11 @@ import {
   setPreviewTheme,
   useFenixTheme,
 } from './utils/themeService';
+import {
+  canonicalizeTabId,
+  preloadPrimaryModulesIdle,
+  preloadTabModule,
+} from './utils/modulePreloader';
 
 const ForgotPasswordModal = lazy(() =>
   import('./components/ForgotPasswordModal').then((m) => ({ default: m.ForgotPasswordModal }))
@@ -153,6 +158,7 @@ export default function App() {
   }, []);
 
   const [activeClient, setActiveClient] = useState<ClientRecord | null>(null);
+  const [clientProfileToOpen, setClientProfileToOpen] = useState<ClientRecord | null>(null);
 
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -182,6 +188,15 @@ export default function App() {
   const [initialOpenTaskModal, setInitialOpenTaskModal] = useState(false);
   const currentTabRef = useRef(currentTab);
   currentTabRef.current = currentTab;
+  const activeCanonicalTab = canonicalizeTabId(currentTab);
+  const [visitedTabs, setVisitedTabs] = useState<string[]>(() => [canonicalizeTabId(currentTab)]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    preloadTabModule(currentTab);
+    const canonical = canonicalizeTabId(currentTab);
+    setVisitedTabs((prev) => (prev.includes(canonical) ? prev : [...prev, canonical]));
+  }, [currentTab, isAuthenticated]);
 
   // Inicialização segura do sistema (executada SOMENTE após autenticação para evitar consultas desnecessárias ao Supabase)
   useEffect(() => {
@@ -304,6 +319,11 @@ export default function App() {
     setIsAuthenticated(false);
     setCurrentUserName('');
     setIsMobileMenuOpen(false);
+    setVisitedTabs([]);
+    setActiveClient(null);
+    setClientProfileToOpen(null);
+    setSelectedOrcamento(null);
+    setOrcamentoViewMode('list');
     try {
       sessionStorage.removeItem('fenix_session_active');
       sessionStorage.removeItem('fenix_session_user');
@@ -521,6 +541,12 @@ export default function App() {
     return defaultActiveTabs;
   }, [currentUserName, permissionsVersion]);
 
+  // Preload silencioso dos chunks dos módulos autorizados em tempo ocioso
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return preloadPrimaryModulesIdle(allowedTabs);
+  }, [isAuthenticated, allowedTabs]);
+
   // Se o usuário tentar acessar uma aba não permitida pelo Éder, redireciona para a primeira permitida
   useEffect(() => {
     if (!isAuthenticated || !currentUserName) return;
@@ -672,11 +698,13 @@ export default function App() {
               }}
               onSelectClient={(client) => {
                 setActiveClient(client);
+                setClientProfileToOpen(client);
                 setCurrentTab('Clientes');
               }}
               onSelectSearchResult={(result) => {
                 if (result.origin === 'Clientes' && result.clientRecord) {
                   setActiveClient(result.clientRecord);
+                  setClientProfileToOpen(result.clientRecord);
                   setCurrentTab('Clientes');
                 } else if (result.origin === 'Orçamentos' && result.rawItem) {
                   setSelectedOrcamento(result.rawItem);
@@ -735,192 +763,272 @@ export default function App() {
             </div>
           )}
 
-          {/* Main Content according to active tab */}
+          {/* Main Content with Keep-Alive tab panels to preserve state, filters and avoid reload delays */}
           <main className="flex-1 pb-10 w-full min-w-0 flex flex-col">
-            <Suspense
-              fallback={
-                <div className="flex-1 flex items-center justify-center py-20 text-slate-500 gap-2.5">
-                  <Loader2 className="w-5 h-5 animate-spin text-[#0057ff]" />
-                  <span className="text-sm font-medium">Carregando módulo...</span>
-                </div>
+            {(visitedTabs.includes(activeCanonicalTab)
+              ? visitedTabs
+              : [...visitedTabs, activeCanonicalTab]
+            ).map((tabKey) => {
+              const isTabActive = tabKey === activeCanonicalTab;
+              let content: ReactNode = null;
+
+              if (tabKey === 'Clientes') {
+                content = (
+                  <ClientesScreen
+                    currentUserName={currentUserName}
+                    initialClient={clientProfileToOpen}
+                    onConsumeInitialClient={() => setClientProfileToOpen(null)}
+                    isActive={isTabActive}
+                    onSelectClientAction={handleQuickAction}
+                  />
+                );
+              } else if (tabKey === 'Calculadora') {
+                content = (
+                  <CalculadoraScreen
+                    client={activeClient}
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onGoToOrcamento={() => {
+                      setCurrentTab('Orçamentos');
+                      setOrcamentoViewMode('create');
+                      setSelectedOrcamento(null);
+                    }}
+                    onSelectClient={(c) => setActiveClient(c)}
+                  />
+                );
+              } else if (tabKey === 'Orçamentos') {
+                content = (
+                  <>
+                    <div
+                      className={
+                        orcamentoViewMode === 'list'
+                          ? 'flex-1 flex flex-col min-w-0'
+                          : 'hidden'
+                      }
+                      aria-hidden={orcamentoViewMode !== 'list'}
+                    >
+                      <OrcamentosListScreen
+                        currentUserName={currentUserName}
+                        isActive={isTabActive && orcamentoViewMode === 'list'}
+                        onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                        onNewOrcamento={() => {
+                          setActiveClient(null);
+                          setSelectedOrcamento(null);
+                          setOrcamentoViewMode('create');
+                        }}
+                        onOpenOrcamento={(orc) => {
+                          setSelectedOrcamento(orc);
+                          setOrcamentoViewMode('edit');
+                        }}
+                      />
+                    </div>
+                    {orcamentoViewMode !== 'list' && (
+                      <OrcamentoScreen
+                        key={
+                          selectedOrcamento?.id ||
+                          (orcamentoViewMode === 'create'
+                            ? 'novo_orcamento'
+                            : 'orcamento_screen')
+                        }
+                        client={activeClient}
+                        initialOrcamento={selectedOrcamento}
+                        scrollToProductsOnMount={scrollToOrcamentoProducts}
+                        onConsumeScrollToProducts={() => setScrollToOrcamentoProducts(false)}
+                        onStatusChangeInProgress={(inProgress) =>
+                          setIsOrcamentoInProgress(inProgress)
+                        }
+                        onBackToList={() => {
+                          setIsOrcamentoInProgress(false);
+                          setScrollToOrcamentoProducts(false);
+                          setActiveClient(null);
+                          setSelectedOrcamento(null);
+                          setOrcamentoViewMode('list');
+                        }}
+                        onBackToCadastro={() => {
+                          setIsOrcamentoInProgress(false);
+                          setScrollToOrcamentoProducts(false);
+                          setCurrentTab('Cadastro');
+                        }}
+                        onSaveSuccess={() => {
+                          setIsOrcamentoInProgress(false);
+                          setScrollToOrcamentoProducts(false);
+                          setActiveClient(null);
+                          setSelectedOrcamento(null);
+                          setOrcamentoViewMode('list');
+                        }}
+                        onCreateDuplicatedOrcamento={(newOrc, clientRec) => {
+                          setIsOrcamentoInProgress(false);
+                          if (clientRec) {
+                            setActiveClient(clientRec);
+                          }
+                          setSelectedOrcamento(newOrc);
+                          setOrcamentoViewMode('edit');
+                          setScrollToOrcamentoProducts(true);
+                        }}
+                        currentUserName={currentUserName}
+                        onSelectClient={(c) => setActiveClient(c)}
+                      />
+                    )}
+                  </>
+                );
+              } else if (tabKey === 'Tarefas') {
+                content = (
+                  <TarefaScreen
+                    client={activeClient}
+                    initialOpenCreateTask={initialOpenTaskModal}
+                    onConsumeOpenCreateTask={() => setInitialOpenTaskModal(false)}
+                    onBackToCadastro={() => setCurrentTab('Clientes')}
+                    currentUserName={currentUserName}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Anotações') {
+                content = (
+                  <AnotacoesScreen
+                    currentUserName={currentUserName}
+                    isActive={isTabActive}
+                  />
+                );
+              } else if (tabKey === 'Promoções Ativas') {
+                content = (
+                  <PromocoesAtivasScreen
+                    currentUserName={currentUserName}
+                    isActive={isTabActive}
+                  />
+                );
+              } else if (tabKey === 'Follow-up') {
+                content = (
+                  <FollowUpScreen
+                    currentUserName={currentUserName}
+                    isActive={isTabActive}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                    onOpenOrcamento={(orc) => {
+                      setSelectedOrcamento(orc);
+                      setOrcamentoViewMode('edit');
+                      setCurrentTab('Orçamentos');
+                    }}
+                  />
+                );
+              } else if (tabKey === 'Pós-Vendas') {
+                content = (
+                  <PosVendasScreen
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Boletos') {
+                content = (
+                  <BoletosScreen
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Pendências') {
+                content = (
+                  <PendenciasScreen
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Notas') {
+                content = (
+                  <NotasScreen
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Metas') {
+                content = (
+                  <MetasScreen
+                    currentUserName={currentUserName}
+                    isActive={isTabActive}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Configurações') {
+                content = (
+                  <ConfiguracoesScreen
+                    currentUserName={currentUserName}
+                    onUpdateUserName={(name) => {
+                      setCurrentUserName(name);
+                      localStorage.setItem('fenix_saved_username', name);
+                    }}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Controle de Estoque') {
+                content = (
+                  <ControleEstoqueScreen
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Vendas' && isDirector) {
+                content = (
+                  <VendasScreen
+                    currentUserName={currentUserName}
+                    onBackToCadastro={() => setCurrentTab('Cadastro')}
+                    onNavigateTab={(tab) => setCurrentTab(tab as any)}
+                  />
+                );
+              } else if (tabKey === 'Notificações') {
+                content = (
+                  <NotificacoesScreen
+                    currentUserName={currentUserName}
+                    onNavigateTab={(tab) => {
+                      if (tab === 'Calculadora') {
+                        setActiveClient(null);
+                      }
+                      setCurrentTab(tab);
+                      if (tab === 'Orçamentos') {
+                        setActiveClient(null);
+                        setOrcamentoViewMode('list');
+                        setSelectedOrcamento(null);
+                      }
+                    }}
+                    onBack={() => setCurrentTab('Clientes')}
+                  />
+                );
+              } else if (tabKey === 'Produtos') {
+                content = <ProdutosScreen currentUserName={currentUserName} />;
+              } else {
+                content = (
+                  <CadastroScreen
+                    currentUserName={currentUserName}
+                    selectedClient={activeClient}
+                    onQuickAction={handleQuickAction}
+                    onClientSaved={(saved) => setActiveClient(saved)}
+                  />
+                );
               }
-            >
-            {currentTab === 'Clientes' ? (
-              <ClientesScreen
-                currentUserName={currentUserName}
-                initialClient={activeClient}
-                onSelectClientAction={handleQuickAction}
-              />
-            ) : currentTab === 'Calculadora' ? (
-              <CalculadoraScreen
-                client={activeClient}
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onGoToOrcamento={() => {
-                  setCurrentTab('Orçamentos');
-                  setOrcamentoViewMode('create');
-                  setSelectedOrcamento(null);
-                }}
-                onSelectClient={(c) => setActiveClient(c)}
-              />
-            ) : currentTab === 'Orçamentos' ? (
-              orcamentoViewMode === 'list' ? (
-                <OrcamentosListScreen
-                  currentUserName={currentUserName}
-                  onNavigateTab={(tab) => setCurrentTab(tab as any)}
-                  onNewOrcamento={() => {
-                    setActiveClient(null);
-                    setSelectedOrcamento(null);
-                    setOrcamentoViewMode('create');
-                  }}
-                  onOpenOrcamento={(orc) => {
-                    setSelectedOrcamento(orc);
-                    setOrcamentoViewMode('edit');
-                  }}
-                />
-              ) : (
-                <OrcamentoScreen
-                  key={selectedOrcamento?.id || (orcamentoViewMode === 'create' ? 'novo_orcamento' : 'orcamento_screen')}
-                  client={activeClient}
-                  initialOrcamento={selectedOrcamento}
-                  scrollToProductsOnMount={scrollToOrcamentoProducts}
-                  onConsumeScrollToProducts={() => setScrollToOrcamentoProducts(false)}
-                  onStatusChangeInProgress={(inProgress) => setIsOrcamentoInProgress(inProgress)}
-                  onBackToList={() => {
-                    setIsOrcamentoInProgress(false);
-                    setScrollToOrcamentoProducts(false);
-                    setActiveClient(null);
-                    setSelectedOrcamento(null);
-                    setOrcamentoViewMode('list');
-                  }}
-                  onBackToCadastro={() => {
-                    setIsOrcamentoInProgress(false);
-                    setScrollToOrcamentoProducts(false);
-                    setCurrentTab('Cadastro');
-                  }}
-                  onSaveSuccess={() => {
-                    setIsOrcamentoInProgress(false);
-                    setScrollToOrcamentoProducts(false);
-                    setActiveClient(null);
-                    setSelectedOrcamento(null);
-                    setOrcamentoViewMode('list');
-                  }}
-                  onCreateDuplicatedOrcamento={(newOrc, clientRec) => {
-                    setIsOrcamentoInProgress(false);
-                    if (clientRec) {
-                      setActiveClient(clientRec);
+
+              return (
+                <div
+                  key={tabKey}
+                  className={isTabActive ? 'flex-1 flex flex-col min-w-0' : 'hidden'}
+                  aria-hidden={!isTabActive}
+                >
+                  <Suspense
+                    fallback={
+                      <div className="flex-1 flex items-center justify-center py-12 text-slate-400 gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-[#0057ff]" />
+                        <span className="text-xs font-medium">Preparando tela...</span>
+                      </div>
                     }
-                    setSelectedOrcamento(newOrc);
-                    setOrcamentoViewMode('edit');
-                    setScrollToOrcamentoProducts(true);
-                  }}
-                  currentUserName={currentUserName}
-                  onSelectClient={(c) => setActiveClient(c)}
-                />
-              )
-            ) : currentTab === 'Agenda' || currentTab === 'Tarefas' ? (
-              <TarefaScreen
-                client={activeClient}
-                initialOpenCreateTask={initialOpenTaskModal}
-                onConsumeOpenCreateTask={() => setInitialOpenTaskModal(false)}
-                onBackToCadastro={() => setCurrentTab('Clientes')}
-                currentUserName={currentUserName}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Anotações' || currentTab === 'Anotacoes' ? (
-              <AnotacoesScreen currentUserName={currentUserName} />
-            ) : currentTab === 'Promoções Ativas' || currentTab === 'Promocoes Ativas' ? (
-              <PromocoesAtivasScreen currentUserName={currentUserName} />
-            ) : currentTab === 'Follow-up' || currentTab === 'FollowUp' ? (
-              <FollowUpScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-                onOpenOrcamento={(orc) => {
-                  setSelectedOrcamento(orc);
-                  setOrcamentoViewMode('edit');
-                  setCurrentTab('Orçamentos');
-                }}
-              />
-            ) : currentTab === 'Obras' || currentTab === 'Pós-Vendas' || currentTab === 'Pós Vendas' || currentTab === 'PosVendas' ? (
-              <PosVendasScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Boletos' ? (
-              <BoletosScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Pendências' || currentTab === 'Pendencias' ? (
-              <PendenciasScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Notas' ? (
-              <NotasScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Metas' || currentTab === 'Meta' ? (
-              <MetasScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Configurações' || currentTab === 'Configuracoes' || currentTab === 'Settings' ? (
-              <ConfiguracoesScreen
-                currentUserName={currentUserName}
-                onUpdateUserName={(name) => {
-                  setCurrentUserName(name);
-                  localStorage.setItem('fenix_saved_username', name);
-                }}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Materiais' || currentTab === 'Controle de Estoque' || currentTab === 'Estoque' ? (
-              <ControleEstoqueScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Vendas' && isDirector ? (
-              <VendasScreen
-                currentUserName={currentUserName}
-                onBackToCadastro={() => setCurrentTab('Cadastro')}
-                onNavigateTab={(tab) => setCurrentTab(tab as any)}
-              />
-            ) : currentTab === 'Notificações' || currentTab === 'Notificacoes' ? (
-              <NotificacoesScreen
-                currentUserName={currentUserName}
-                onNavigateTab={(tab) => {
-                  if (tab === 'Calculadora') {
-                    setActiveClient(null);
-                  }
-                  setCurrentTab(tab);
-                  if (tab === 'Orçamentos') {
-                    setActiveClient(null);
-                    setOrcamentoViewMode('list');
-                    setSelectedOrcamento(null);
-                  }
-                }}
-                onBack={() => setCurrentTab('Clientes')}
-              />
-            ) : currentTab === 'Produtos' ? (
-              <ProdutosScreen currentUserName={currentUserName} />
-            ) : (
-              <CadastroScreen
-                currentUserName={currentUserName}
-                selectedClient={activeClient}
-                onQuickAction={handleQuickAction}
-                onClientSaved={(saved) => setActiveClient(saved)}
-              />
-            )}
-            </Suspense>
+                  >
+                    {content}
+                  </Suspense>
+                </div>
+              );
+            })}
           </main>
         </div>
       </div>

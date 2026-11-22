@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   PhoneCall,
   MessageCircle,
@@ -106,6 +106,7 @@ interface FollowUpScreenProps {
   onBackToCadastro?: () => void;
   onNavigateTab?: (tab: string) => void;
   onOpenOrcamento?: (orc: SavedOrcamento) => void;
+  isActive?: boolean;
 }
 
 const STORAGE_KEY = 'fenix_followup_cards_v2';
@@ -372,8 +373,11 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
   currentUserName = 'Vinicius Gestor',
   onNavigateTab,
   onOpenOrcamento,
+  isActive = true,
 }) => {
   const [pendingSyncTick, setPendingSyncTick] = useState(0);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   useEffect(() => subscribePendingSync(() => setPendingSyncTick((t) => t + 1)), []);
 
@@ -1006,6 +1010,7 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
 
     const handleSync = (ev?: Event) => {
       const now = Date.now();
+      if (ev?.type === 'focus' && !isActiveRef.current) return;
       if (isPersistingRef.current || isSyncingRef.current) return;
       if (now - lastSelfSyncWriteAtRef.current < 5000) return;
       if (
@@ -1705,6 +1710,45 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
     sortOrder,
     todayStr,
   ]);
+
+  const followUpWhatsAppTemplate = useMemo(
+    () => getWhatsAppMessageTemplate('Follow-up de Orçamentos'),
+    [pendingSyncTick]
+  );
+
+  // Carregamento progressivo de cards para abertura instantânea em bases extensas
+  const [visibleGroupsLimit, setVisibleGroupsLimit] = useState(40);
+  const loadMoreGroupsSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setVisibleGroupsLimit(40);
+  }, [situacaoFilter, activeTab, clientTypeFilter, valueFilter, searchTerm, sortOrder]);
+
+  const visibleClientGroups = useMemo(
+    () => filteredClientGroups.slice(0, visibleGroupsLimit),
+    [filteredClientGroups, visibleGroupsLimit]
+  );
+
+  useEffect(() => {
+    if (visibleGroupsLimit >= filteredClientGroups.length) return;
+    const el = loadMoreGroupsSentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      const timer = setTimeout(() => {
+        setVisibleGroupsLimit((prev) => Math.min(filteredClientGroups.length, prev + 50));
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleGroupsLimit((prev) => Math.min(filteredClientGroups.length, prev + 50));
+        }
+      },
+      { rootMargin: '300px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleGroupsLimit, filteredClientGroups.length]);
 
   // Contadores para o resumo de resultados exibidos
   const totalBudgetsInFiltered = useMemo(() => {
@@ -2849,7 +2893,7 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredClientGroups.map((group) => {
+          {visibleClientGroups.map((group) => {
             const isExpanded = !!expandedClients[group.clientKey];
             const visual = getClientTypeVisual(group.clientType);
             const TypeIcon = visual.Icon;
@@ -2923,8 +2967,7 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
                       const cleanDigits = clientPhone.replace(/\D/g, '');
                       let waLink: string | null = null;
                       if (cleanDigits) {
-                        const template = getWhatsAppMessageTemplate('Follow-up de Orçamentos');
-                        const msg = formatOrcamentoMessage(template, {
+                        const msg = formatOrcamentoMessage(followUpWhatsAppTemplate, {
                           clientName: group.clientName,
                           totalFinal: group.totalValor,
                           consultoraName: firstBudget?.vendedor || currentUserName || 'Consultora Fênix',
@@ -3158,8 +3201,7 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
                               const cleanDigits = budgetPhone.replace(/\D/g, '');
                               let waUrl: string | null = null;
                               if (cleanDigits) {
-                                const template = getWhatsAppMessageTemplate('Follow-up de Orçamentos');
-                                const msg = formatOrcamentoMessage(template, {
+                                const msg = formatOrcamentoMessage(followUpWhatsAppTemplate, {
                                   clientName: budget.cliente,
                                   totalFinal: Number(budget.valor) || 0,
                                   consultoraName: budget.vendedor || currentUserName || 'Consultora Fênix',
@@ -3323,6 +3365,19 @@ export const FollowUpScreen: React.FC<FollowUpScreenProps> = ({
               </div>
             );
           })}
+          {visibleClientGroups.length < filteredClientGroups.length && (
+            <div ref={loadMoreGroupsSentinelRef} className="py-3 text-center">
+              <button
+                type="button"
+                onClick={() =>
+                  setVisibleGroupsLimit((prev) => Math.min(filteredClientGroups.length, prev + 50))
+                }
+                className="text-xs font-semibold text-[#0052cc] hover:underline cursor-pointer"
+              >
+                Carregar mais clientes ({filteredClientGroups.length - visibleClientGroups.length} restantes)
+              </button>
+            </div>
+          )}
         </div>
       )}
             </>

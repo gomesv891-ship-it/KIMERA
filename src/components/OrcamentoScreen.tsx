@@ -75,6 +75,8 @@ import {
   exportEspelhoToPdf,
   exportEspelhoToImage,
   copyEspelhoImageToClipboard,
+  captureEspelhoToBlob,
+  warmEspelhoFontCache,
 } from '../utils/orcamentoExport';
 import {
   BudgetThemeVariant,
@@ -3976,6 +3978,13 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   const hasSavedSuccessfullyRef = useRef(false);
   const persistedOrcIdRef = useRef<string | null>(initialOrcamento?.id || null);
   const lastSavedFingerprintRef = useRef<string | null>(null);
+  const lastConfirmedOrcamentoRef = useRef<SavedOrcamento | null>(null);
+  const pendingImageDownloadAfterDecisionRef = useRef<boolean>(false);
+  const preparedImageCaptureRef = useRef<{
+    fingerprint: string;
+    themeKey: string;
+    promise: Promise<Blob>;
+  } | null>(null);
 
   // Tema visual local do Espelho Oficial (não altera o tema global do sistema nem duplica registros)
   const [localEspelhoThemeId, setLocalEspelhoThemeId] = useState<FenixThemeId | null>(null);
@@ -4009,6 +4018,9 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   useEffect(() => {
     hasSavedSuccessfullyRef.current = false;
     lastSavedFingerprintRef.current = null;
+    lastConfirmedOrcamentoRef.current = null;
+    pendingImageDownloadAfterDecisionRef.current = false;
+    preparedImageCaptureRef.current = null;
     setLocalEspelhoThemeId(null);
     setLocalEspelhoVariant(null);
     if (initialOrcamento?.id) {
@@ -4270,6 +4282,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
 
       hasSavedSuccessfullyRef.current = true;
       const confirmedData = (resHistory.data as SavedOrcamento) || orcamentoData;
+      lastConfirmedOrcamentoRef.current = confirmedData;
 
       // 2. Atualiza espelho local/eventos e limpa rascunho somente após confirmação do Supabase
       try {
@@ -4290,7 +4303,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
 
       window.dispatchEvent(new Event('fenix_orcamentos_updated'));
 
-      // 3. Atualização imediata do Follow-up local e espelhamento secundário no Supabase
+      // 3. Atualização imediata do Follow-up local e espelhamento secundário em segundo plano (sem bloquear a UI)
       try {
         await syncSingleOrcamentoToFollowUp(confirmedData, {
           currentUser: actorName,
@@ -4317,7 +4330,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
         });
       }
 
-      await saveItemToSupabase('fenix_saved_orcamentos', confirmedData, 'id', actorName).catch((e) =>
+      saveItemToSupabase('fenix_saved_orcamentos', confirmedData, 'id', actorName).catch((e) =>
         console.warn('Erro ao espelhar fenix_saved_orcamentos:', e)
       );
       syncSingleOrcamentoToFollowUp(confirmedData, {
@@ -4335,6 +4348,33 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
           'Não foi possível salvar no Supabase. Verifique sua conexão e tente novamente.',
       };
     }
+  };
+
+  const getExportVisualKey = () =>
+    `${effectiveEspelhoThemeId}:${effectiveEspelhoVariant}:${exibirQuantidade}`;
+
+  const prepareEspelhoImageCapture = () => {
+    const element = document.getElementById('espelho-oficial-orcamento');
+    if (!element) return;
+    const fingerprint = getCurrentBudgetFingerprint();
+    const themeKey = getExportVisualKey();
+    const current = preparedImageCaptureRef.current;
+    if (current && current.fingerprint === fingerprint && current.themeKey === themeKey) {
+      return;
+    }
+    const capturePromise = captureEspelhoToBlob(element, { skipSettlementDelay: true }).then(
+      (res) => res.blob
+    );
+    capturePromise.catch(() => {
+      if (preparedImageCaptureRef.current?.promise === capturePromise) {
+        preparedImageCaptureRef.current = null;
+      }
+    });
+    preparedImageCaptureRef.current = {
+      fingerprint,
+      themeKey,
+      promise: capturePromise,
+    };
   };
 
   // Ação 1: Baixar Orçamento como PDF Oficial
@@ -4367,7 +4407,22 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
 
     try {
       const filename = getOrcamentoExportFileName(clientName, dataOrcamento, format);
-      await exportEspelhoToImage(element, filename, format);
+      let preCapturedBlob: Blob | null = null;
+      const prepared = preparedImageCaptureRef.current;
+      if (
+        prepared &&
+        prepared.fingerprint === getCurrentBudgetFingerprint() &&
+        prepared.themeKey === getExportVisualKey()
+      ) {
+        try {
+          preCapturedBlob = await prepared.promise;
+        } catch {
+          preCapturedBlob = null;
+        }
+      }
+      preparedImageCaptureRef.current = null;
+
+      await exportEspelhoToImage(element, filename, format, preCapturedBlob);
       showToast(`✓ Imagem ${format.toUpperCase()} baixada com sucesso!`);
       return true;
     } catch (err) {
@@ -4442,7 +4497,9 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     return true;
   };
 
-  // Orquestrador único: Valida -> Salva no Supabase (quando necessário) -> Executa Ação -> Abre Janela de Decisão na 1ª gravação
+  // Orquestrador único:
+  // - Para BAIXAR IMAGEM: Valida -> Salva no Supabase -> Abre Janela de Decisão (duplicar ou manter) -> Gera e baixa a imagem.
+  // - Para demais ações: Valida -> Salva no Supabase (quando necessário) -> Executa Ação -> Abre Janela de Decisão na 1ª gravação.
   const executeSaveAndAction = async (actionType: OrcamentoActionType) => {
     if (actionLockRef.current || isSavingRef.current || isSaving || isExporting) {
       return;
@@ -4452,6 +4509,11 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     if (!validation.valid) {
       showToast(validation.error || 'Preencha os dados obrigatórios do orçamento.');
       return;
+    }
+
+    const isImageAction = actionType === 'image' || actionType === 'image_jpg';
+    if (isImageAction || actionType === 'pdf' || actionType === 'copy_image') {
+      warmEspelhoFontCache();
     }
 
     const currentFingerprint = getCurrentBudgetFingerprint();
@@ -4467,19 +4529,14 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     if (!canExportDirectlyWithoutReSaving) {
       setIsSaving(true);
     }
-    if (
-      actionType === 'pdf' ||
-      actionType === 'image' ||
-      actionType === 'image_jpg' ||
-      actionType === 'copy_image'
-    ) {
+    if (actionType === 'pdf' || actionType === 'copy_image') {
       setIsExporting(true);
     }
 
     try {
       let confirmedOrcamento: SavedOrcamento | null = null;
 
-      if (!canExportDirectlyWithoutReSaving) {
+      if (!canExportDirectlyWithoutReSaving || (isImageAction && !lastConfirmedOrcamentoRef.current)) {
         const saveRes = await persistOrcamentoToDatabase(false);
         if (!saveRes.success || !saveRes.data) {
           showToast(
@@ -4490,16 +4547,30 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
         }
         confirmedOrcamento = saveRes.data;
         lastSavedFingerprintRef.current = currentFingerprint;
+      } else if (isImageAction) {
+        confirmedOrcamento = lastConfirmedOrcamentoRef.current;
+      }
+
+      if (isImageAction) {
+        if (!confirmedOrcamento) return;
+        pendingImageDownloadAfterDecisionRef.current = true;
+        // Pré-renderiza o espelho em paralelo enquanto o usuário visualiza a confirmação de duplicação
+        prepareEspelhoImageCapture();
+        const initialModalNome =
+          confirmedOrcamento.nomeOrcamento?.trim() ||
+          nomeOrcamento.trim() ||
+          'Orçamento de Materiais';
+        setDecisionBudgetName(initialModalNome);
+        setFinalizeError(null);
+        setPostSaveTriggerAction(actionType);
+        setPostSaveDecisionOrcamento(confirmedOrcamento);
+        return;
       }
 
       let actionOk = true;
 
       if (actionType === 'pdf') {
         actionOk = await runPdfExportAction();
-      } else if (actionType === 'image') {
-        actionOk = await runImageDownloadAction('png');
-      } else if (actionType === 'image_jpg') {
-        actionOk = await runImageDownloadAction('jpg');
       } else if (actionType === 'print') {
         window.print();
         actionOk = true;
@@ -4545,28 +4616,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   const handleSaveOrcamento = () => executeSaveAndAction('save');
   const handlePrintPdf = () => executeSaveAndAction('print');
   const handleDownloadPdf = () => executeSaveAndAction('pdf');
-  const handleDownloadImage = async () => {
-    if (isExporting || actionLockRef.current) return;
-    const element = document.getElementById('espelho-oficial-orcamento');
-    if (!element) {
-      showToast('Espelho oficial do orçamento não encontrado na tela.', 2500);
-      return;
-    }
-
-    try {
-      setIsExporting(true);
-      setActiveActionType('image');
-      const filename = getOrcamentoExportFileName(clientName, dataOrcamento, 'png');
-      await exportEspelhoToImage(element, filename, 'png');
-      showToast('✓ Imagem baixada!', 2400);
-    } catch (err) {
-      console.error('Erro ao baixar imagem:', err);
-      showToast('Não foi possível baixar a imagem diretamente.', 3000);
-    } finally {
-      setActiveActionType(null);
-      setIsExporting(false);
-    }
-  };
+  const handleDownloadImage = () => executeSaveAndAction('image');
   const handleCopyImageFromEditor = async () => {
     if (isExporting || actionLockRef.current) return;
     const element = document.getElementById('espelho-oficial-orcamento');
@@ -4578,6 +4628,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
     try {
       setIsExporting(true);
       setActiveActionType('copy_image');
+      warmEspelhoFontCache(element);
       const copied = await copyEspelhoImageToClipboard(element);
       if (copied) {
         if (copiedBadgeTimerRef.current) window.clearTimeout(copiedBadgeTimerRef.current);
@@ -4600,9 +4651,34 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
   };
   const handleSendWhatsApp = () => executeSaveAndAction('whatsapp');
 
+  const completePendingImageDownloadIfNeeded = async () => {
+    if (!pendingImageDownloadAfterDecisionRef.current) return;
+    pendingImageDownloadAfterDecisionRef.current = false;
+    setIsExporting(true);
+    try {
+      await runImageDownloadAction('png');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDismissDecisionModal = async () => {
+    if (isFinalizing || isPreparingDuplicate) return;
+    setFinalizeError(null);
+    setPostSaveDecisionOrcamento(null);
+    setPostSaveTriggerAction(null);
+    await completePendingImageDownloadIfNeeded();
+  };
+
+  const handleCancelDuplicateModal = async () => {
+    if (isCreatingDuplicate) return;
+    setIsDuplicateModalOpen(false);
+    await completePendingImageDownloadIfNeeded();
+  };
+
   // Opção FINALIZAR na Janela de Decisão:
-  // Atualiza o registro original no Supabase com o Nome do orçamento atualizado (preservando ID e todos os dados),
-  // confirma a gravação, fecha a janela e redireciona para a aba ORÇAMENTOS.
+  // Mantém o orçamento original (atualizando no Supabase apenas se o nome foi alterado na modal),
+  // baixa a imagem se o fluxo veio de BAIXAR IMAGEM, fecha a janela e redireciona para a aba ORÇAMENTOS.
   const handleFinalizeDecisionModal = async () => {
     const savedOrc = postSaveDecisionOrcamento;
     if (!savedOrc || finalizingLockRef.current || isFinalizing || isPreparingDuplicate) return;
@@ -4622,23 +4698,35 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
       const nomeChanged = trimmedDecisionNome !== (savedOrc.nomeOrcamento || '').trim();
       setNomeOrcamento(trimmedDecisionNome);
 
-      const saveRes = await persistOrcamentoToDatabase(false, {
-        forcedOrcId: savedOrc.id,
-        fallbackSavedAt: savedOrc.savedAt,
-        fallbackNomeOrcamento: savedOrc.nomeOrcamento,
-        overrideNomeOrcamento: trimmedDecisionNome,
-        skipActivityLog: !nomeChanged,
-      });
+      const needsRemoteSave =
+        nomeChanged ||
+        !hasSavedSuccessfullyRef.current ||
+        lastSavedFingerprintRef.current !== getCurrentBudgetFingerprint();
 
-      if (!saveRes.success || !saveRes.data) {
-        setFinalizeError(
-          saveRes.error ||
-            'Não foi possível salvar as alterações no Supabase. Tente novamente.'
-        );
-        return;
+      let confirmedOrc = lastConfirmedOrcamentoRef.current || savedOrc;
+      if (needsRemoteSave) {
+        const saveRes = await persistOrcamentoToDatabase(false, {
+          forcedOrcId: savedOrc.id,
+          fallbackSavedAt: savedOrc.savedAt,
+          fallbackNomeOrcamento: savedOrc.nomeOrcamento,
+          overrideNomeOrcamento: trimmedDecisionNome,
+          skipActivityLog: !nomeChanged,
+        });
+
+        if (!saveRes.success || !saveRes.data) {
+          setFinalizeError(
+            saveRes.error ||
+              'Não foi possível salvar as alterações no Supabase. Tente novamente.'
+          );
+          return;
+        }
+        confirmedOrc = saveRes.data;
+        lastSavedFingerprintRef.current = getCurrentBudgetFingerprint();
       }
 
-      const confirmedOrc = saveRes.data;
+      // Gera e baixa a imagem antes de sair da tela (enquanto o Espelho Oficial ainda está montado)
+      await completePendingImageDownloadIfNeeded();
+
       setFinalizeError(null);
       setPostSaveDecisionOrcamento(null);
       setPostSaveTriggerAction(null);
@@ -4695,6 +4783,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
           );
           return;
         }
+        lastSavedFingerprintRef.current = getCurrentBudgetFingerprint();
       } catch (err: any) {
         setFinalizeError(
           err?.message ||
@@ -4822,7 +4911,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
       } catch {}
 
       window.dispatchEvent(new Event('fenix_orcamentos_updated'));
-      await saveItemToSupabase('fenix_saved_orcamentos', confirmedNewOrc, 'id', actorName).catch((e) =>
+      saveItemToSupabase('fenix_saved_orcamentos', confirmedNewOrc, 'id', actorName).catch((e) =>
         console.warn('Erro ao espelhar novo orçamento duplicado:', e)
       );
       syncSingleOrcamentoToFollowUp(confirmedNewOrc, {
@@ -4844,6 +4933,9 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
           relevantInfo: `Consultora: ${resolvedConsultora}`,
         });
       }
+
+      // Gera e baixa a imagem do orçamento original antes de trocar para a cópia independente
+      await completePendingImageDownloadIfNeeded();
 
       setIsDuplicateModalOpen(false);
       setDuplicateBudgetName('');
@@ -7249,20 +7341,26 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
               </span>
             </button>
 
-            {/* Baixar Orçamento como Imagem (download imediato com nome padrão) */}
+            {/* Baixar Orçamento como Imagem (salva, pergunta se deseja duplicar e baixa a imagem) */}
             <button
               type="button"
               disabled={isSaving || isExporting || activeActionType !== null}
               onClick={handleDownloadImage}
               className="h-11 px-4 sm:px-5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-[#0057ff] font-bold text-xs sm:text-sm flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
-              title="Baixar imagem completa do orçamento imediatamente"
+              title="Salvar alterações, confirmar duplicação e baixar imagem do orçamento"
             >
               {activeActionType === 'image' ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Download className="w-4 h-4" />
               )}
-              <span>{activeActionType === 'image' ? 'Baixando...' : 'Baixar Imagem'}</span>
+              <span>
+                {activeActionType === 'image'
+                  ? isSaving
+                    ? 'Salvando...'
+                    : 'Baixando...'
+                  : 'Baixar Imagem'}
+              </span>
             </button>
 
             {/* Imprimir Orçamento */}
@@ -7416,11 +7514,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
               <button
                 type="button"
                 disabled={isFinalizing || isPreparingDuplicate}
-                onClick={() => {
-                  setFinalizeError(null);
-                  setPostSaveDecisionOrcamento(null);
-                  setPostSaveTriggerAction(null);
-                }}
+                onClick={handleDismissDecisionModal}
                 className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
                 title="Fechar"
               >
@@ -7539,7 +7633,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
               <button
                 type="button"
                 disabled={isCreatingDuplicate}
-                onClick={() => setIsDuplicateModalOpen(false)}
+                onClick={handleCancelDuplicateModal}
                 className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
                 title="Fechar"
               >
@@ -7608,7 +7702,7 @@ export const OrcamentoScreen: React.FC<OrcamentoScreenProps> = ({
                 <button
                   type="button"
                   disabled={isCreatingDuplicate}
-                  onClick={() => setIsDuplicateModalOpen(false)}
+                  onClick={handleCancelDuplicateModal}
                   className="h-11 px-5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Cancelar

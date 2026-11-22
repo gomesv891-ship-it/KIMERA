@@ -7,11 +7,13 @@ import {
 import {
   clearDeletionTombstones,
   enqueueCollectionWrite,
+  fetchSupabaseKeysIndividually,
   formatSupabaseErrorMessage,
   getDeletedIdsForCollection,
   getLocalRawSafe,
   getSupabaseClient,
   isItemTombstoned,
+  primeSupabaseKeyCache,
   recordDeletionTombstones,
   recordSelfSave,
   safeMergeLists,
@@ -1061,7 +1063,7 @@ export function parsePromocoesPayload(payload: unknown): PromoCampaign[] {
   });
 }
 
-function readCachedPromocoes(): PromoCampaign[] {
+export function readCachedPromocoes(): PromoCampaign[] {
   if (typeof window === 'undefined') return [];
   try {
     const rawPrimary = getLocalRawSafe(PROMOCOES_SUPABASE_KEY);
@@ -1077,12 +1079,16 @@ function readCachedPromocoes(): PromoCampaign[] {
   }
 }
 
-function writeCachedPromocoes(campaigns: PromoCampaign[]): void {
+function writeCachedPromocoes(campaigns: PromoCampaign[], dispatchEvent = true): void {
   if (typeof window === 'undefined') return;
   try {
-    setLocalCollectionSafe(PROMOCOES_SUPABASE_KEY, campaigns);
-    setLocalCollectionSafe(PROMOCOES_CACHE_KEY, campaigns);
-    window.dispatchEvent(new Event('fenix_promocoes_updated'));
+    const serialized = JSON.stringify(campaigns);
+    const prevRaw = getLocalRawSafe(PROMOCOES_SUPABASE_KEY);
+    setLocalCollectionSafe(PROMOCOES_SUPABASE_KEY, serialized);
+    setLocalCollectionSafe(PROMOCOES_CACHE_KEY, serialized);
+    if (dispatchEvent && prevRaw !== serialized) {
+      window.dispatchEvent(new Event('fenix_promocoes_updated'));
+    }
   } catch {
     // ignore
   }
@@ -1102,6 +1108,13 @@ async function fetchRemotePromocoesRow(
   if (isEmergencyOfflineMode() || !client) {
     return {
       data: { data: readCachedPromocoes() },
+      error: null,
+    };
+  }
+  const { rows, succeededKeys } = await fetchSupabaseKeysIndividually([PROMOCOES_SUPABASE_KEY], 15000);
+  if (succeededKeys.has(PROMOCOES_SUPABASE_KEY)) {
+    return {
+      data: rows.has(PROMOCOES_SUPABASE_KEY) ? { data: rows.get(PROMOCOES_SUPABASE_KEY) } : null,
       error: null,
     };
   }
@@ -1183,6 +1196,8 @@ async function upsertPromocoesRow(
     );
 
     if (!res?.error) {
+      const confirmedUpdatedAt = res?.data?.updated_at ? String(res.data.updated_at) : nowIso;
+      primeSupabaseKeyCache(PROMOCOES_SUPABASE_KEY, updatedList, confirmedUpdatedAt);
       if (pendingMeta) {
         removePendingSyncRecord(PROMOCOES_SUPABASE_KEY, pendingMeta.itemId);
         if (pendingMeta.op === 'delete') {
@@ -1263,7 +1278,7 @@ export async function fetchPromocoesFromSupabase(): Promise<{
         deletedMap
       ) as PromoCampaign[];
       if (merged.length > 0 || localCached.length === 0) {
-        writeCachedPromocoes(merged);
+        writeCachedPromocoes(merged, false);
       }
       return { success: true, campaigns: merged.length > 0 ? merged : localCached };
     } catch (err: any) {

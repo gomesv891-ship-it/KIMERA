@@ -1,8 +1,10 @@
 import {
   enqueueCollectionWrite,
+  fetchSupabaseKeysIndividually,
   formatSupabaseErrorMessage,
   getLocalRawSafe,
   getSupabaseClient,
+  primeSupabaseKeyCache,
   recordSelfSave,
   setLocalCollectionSafe,
   withAbortableTimeout,
@@ -788,27 +790,35 @@ let inFlightAnotacoesFetch: Promise<{
   error?: string;
 }> | null = null;
 
+export function readCachedAnotacoesDb(): AnotacoesDatabaseV2 | null {
+  try {
+    const raw = getLocalRawSafe(ANOTACOES_SUPABASE_KEY);
+    if (!raw) return null;
+    return parseAnotacoesDatabase(raw);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Busca todo o banco de anotações diretamente do Supabase (sem usar localStorage).
+ * Busca o banco de anotações no Supabase reutilizando cache inteligente e verificação leve por updated_at.
  */
-export async function fetchAnotacoesDbFromSupabase(): Promise<{
+export async function fetchAnotacoesDbFromSupabase(options?: {
+  maxCacheAgeMs?: number;
+}): Promise<{
   success: boolean;
   db: AnotacoesDatabaseV2;
   error?: string;
 }> {
   if (isEmergencyOfflineMode()) {
-    const raw = getLocalRawSafe(ANOTACOES_SUPABASE_KEY);
-    if (!raw) {
-      return { success: true, db: createEmptyDatabase() };
-    }
-    return { success: true, db: parseAnotacoesDatabase(raw) };
+    return { success: true, db: readCachedAnotacoesDb() || createEmptyDatabase() };
   }
 
   const client = getSupabaseClient();
   if (!client) {
-    const raw = getLocalRawSafe(ANOTACOES_SUPABASE_KEY);
-    if (raw) {
-      return { success: true, db: parseAnotacoesDatabase(raw) };
+    const cached = readCachedAnotacoesDb();
+    if (cached) {
+      return { success: true, db: cached };
     }
     return {
       success: false,
@@ -823,6 +833,28 @@ export async function fetchAnotacoesDbFromSupabase(): Promise<{
 
   inFlightAnotacoesFetch = (async () => {
     try {
+      const { rows, succeededKeys } = await fetchSupabaseKeysIndividually(
+        [ANOTACOES_SUPABASE_KEY],
+        15000,
+        { maxCacheAgeMs: options?.maxCacheAgeMs }
+      );
+
+      if (succeededKeys.has(ANOTACOES_SUPABASE_KEY)) {
+        const rawData = rows.get(ANOTACOES_SUPABASE_KEY);
+        if (rawData === undefined || rawData === null) {
+          return { success: true, db: createEmptyDatabase() };
+        }
+        const parsedDb = parseAnotacoesDatabase(rawData);
+        const serialized = JSON.stringify(parsedDb);
+        if (getLocalRawSafe(ANOTACOES_SUPABASE_KEY) !== serialized) {
+          setLocalCollectionSafe(ANOTACOES_SUPABASE_KEY, serialized);
+        }
+        return {
+          success: true,
+          db: parsedDb,
+        };
+      }
+
       const res = await withAbortableTimeout<any>(
         (signal) =>
           client
@@ -838,7 +870,7 @@ export async function fetchAnotacoesDbFromSupabase(): Promise<{
       if (res?.error) {
         return {
           success: false,
-          db: createEmptyDatabase(),
+          db: readCachedAnotacoesDb() || createEmptyDatabase(),
           error: formatSupabaseErrorMessage(res.error, 'Falha ao buscar anotações no Supabase.'),
         };
       }
@@ -848,6 +880,8 @@ export async function fetchAnotacoesDbFromSupabase(): Promise<{
       }
 
       const parsedDb = parseAnotacoesDatabase(res.data.data);
+      const remoteUpdatedAt = res.data.updated_at ? String(res.data.updated_at) : undefined;
+      primeSupabaseKeyCache(ANOTACOES_SUPABASE_KEY, parsedDb, remoteUpdatedAt);
       setLocalCollectionSafe(ANOTACOES_SUPABASE_KEY, parsedDb);
       return {
         success: true,
@@ -856,7 +890,7 @@ export async function fetchAnotacoesDbFromSupabase(): Promise<{
     } catch (err: any) {
       return {
         success: false,
-        db: createEmptyDatabase(),
+        db: readCachedAnotacoesDb() || createEmptyDatabase(),
         error: formatSupabaseErrorMessage(err, 'Erro inesperado ao carregar anotações.'),
       };
     } finally {
@@ -924,37 +958,48 @@ async function fetchAndMutateDb(
 
   return enqueueCollectionWrite(ANOTACOES_SUPABASE_KEY, async () => {
     try {
-      const { data: remoteRow, error: fetchErr } = await withAbortableTimeout<any>(
-        (signal) =>
-          client
-            .from('fenix_kv_store')
-            .select('data')
-            .eq('key', ANOTACOES_SUPABASE_KEY)
-            .abortSignal(signal)
-            .maybeSingle(),
-        15000,
-        'Tempo limite ao consultar anotações no Supabase.'
+      const { rows, succeededKeys } = await fetchSupabaseKeysIndividually(
+        [ANOTACOES_SUPABASE_KEY],
+        15000
       );
 
-      if (fetchErr) {
-        const fallbackDb = applyLocalFallbackMutation();
-        return {
-          success: false,
-          db: fallbackDb,
-          error: formatSupabaseErrorMessage(fetchErr, 'Erro ao consultar anotações no Supabase. Salvo localmente para sincronização.'),
-        };
-      }
+      let remoteDb: AnotacoesDatabaseV2;
+      if (succeededKeys.has(ANOTACOES_SUPABASE_KEY)) {
+        const rawData = rows.get(ANOTACOES_SUPABASE_KEY);
+        remoteDb = rawData ? parseAnotacoesDatabase(rawData) : createEmptyDatabase();
+      } else {
+        const { data: remoteRow, error: fetchErr } = await withAbortableTimeout<any>(
+          (signal) =>
+            client
+              .from('fenix_kv_store')
+              .select('data')
+              .eq('key', ANOTACOES_SUPABASE_KEY)
+              .abortSignal(signal)
+              .maybeSingle(),
+          15000,
+          'Tempo limite ao consultar anotações no Supabase.'
+        );
 
-      const remoteDb = remoteRow?.data
-        ? parseAnotacoesDatabase(remoteRow.data)
-        : createEmptyDatabase();
+        if (fetchErr) {
+          const fallbackDb = applyLocalFallbackMutation();
+          return {
+            success: false,
+            db: fallbackDb,
+            error: formatSupabaseErrorMessage(fetchErr, 'Erro ao consultar anotações no Supabase. Salvo localmente para sincronização.'),
+          };
+        }
+
+        remoteDb = remoteRow?.data
+          ? parseAnotacoesDatabase(remoteRow.data)
+          : createEmptyDatabase();
+      }
 
       const nextDb = mutator(remoteDb);
       const nowIso = new Date().toISOString();
 
       recordSelfSave(ANOTACOES_SUPABASE_KEY, nowIso);
 
-      const { error: upsertErr } = await withAbortableTimeout<any>(
+      const { data: upsertRow, error: upsertErr } = await withAbortableTimeout<any>(
         (signal) =>
           client
             .from('fenix_kv_store')
@@ -999,6 +1044,8 @@ async function fetchAndMutateDb(
         };
       }
 
+      const confirmedAt = upsertRow?.updated_at ? String(upsertRow.updated_at) : nowIso;
+      primeSupabaseKeyCache(ANOTACOES_SUPABASE_KEY, nextDb, confirmedAt);
       setLocalCollectionSafe(ANOTACOES_SUPABASE_KEY, nextDb);
       if (onPendingTrack) onPendingTrack(nextDb, true);
 

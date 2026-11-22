@@ -57,6 +57,8 @@ import {
 interface ClientesScreenProps {
   currentUserName: string;
   initialClient?: ClientRecord | null;
+  onConsumeInitialClient?: () => void;
+  isActive?: boolean;
   onSelectClientAction: (
     action: 'Calculadora' | 'Orçamentos' | 'Tarefas',
     client: ClientRecord,
@@ -124,6 +126,8 @@ const CLIENT_TYPE_ITEMS: ClientTypeItem[] = [
 export const ClientesScreen: React.FC<ClientesScreenProps> = ({
   currentUserName,
   initialClient,
+  onConsumeInitialClient,
+  isActive = true,
   onSelectClientAction,
 }) => {
   const [clients, setClients] = useState<ClientRecord[]>(() =>
@@ -132,6 +136,8 @@ export const ClientesScreen: React.FC<ClientesScreenProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategoryTab, setActiveCategoryTab] = useState<CategoryTab>('todos');
   const [pendingSyncTick, setPendingSyncTick] = useState(0);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   useEffect(() => subscribePendingSync(() => setPendingSyncTick((t) => t + 1)), []);
 
@@ -145,10 +151,11 @@ export const ClientesScreen: React.FC<ClientesScreenProps> = ({
   } | null>(null);
 
   useEffect(() => {
-    if (initialClient) {
+    if (isActive && initialClient) {
       setViewingClient(initialClient);
+      onConsumeInitialClient?.();
     }
-  }, [initialClient]);
+  }, [isActive, initialClient, onConsumeInitialClient]);
 
   // Edit form state
   const [editForm, setEditForm] = useState<{
@@ -269,7 +276,7 @@ export const ClientesScreen: React.FC<ClientesScreenProps> = ({
     };
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (isActiveRef.current && document.visibilityState === 'visible') {
         syncClientsWithSupabase();
       }
     };
@@ -750,6 +757,40 @@ export const ClientesScreen: React.FC<ClientesScreenProps> = ({
     });
   }, [userClients, activeCategoryTab, searchTerm]);
 
+  // Renderização progressiva para evitar travamento do DOM em carteiras extensas
+  const [visibleClientsLimit, setVisibleClientsLimit] = useState(60);
+  const loadMoreClientsSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setVisibleClientsLimit(60);
+  }, [searchTerm, activeCategoryTab]);
+
+  const visibleClients = useMemo(
+    () => filteredClients.slice(0, visibleClientsLimit),
+    [filteredClients, visibleClientsLimit]
+  );
+
+  useEffect(() => {
+    if (visibleClientsLimit >= filteredClients.length) return;
+    const el = loadMoreClientsSentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      const timer = setTimeout(() => {
+        setVisibleClientsLimit((prev) => Math.min(filteredClients.length, prev + 80));
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleClientsLimit((prev) => Math.min(filteredClients.length, prev + 80));
+        }
+      },
+      { rootMargin: '250px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleClientsLimit, filteredClients.length]);
+
   // Format date helper
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return '—';
@@ -977,7 +1018,7 @@ export const ClientesScreen: React.FC<ClientesScreenProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
-                {filteredClients.map((client) => {
+                {visibleClients.map((client) => {
                   const { Icon: TypeIcon, bgClass } = getClientTypeIconInfo(client.clientType);
 
                   return (
@@ -1102,6 +1143,22 @@ export const ClientesScreen: React.FC<ClientesScreenProps> = ({
                 })}
               </tbody>
             </table>
+            {visibleClients.length < filteredClients.length && (
+              <div
+                ref={loadMoreClientsSentinelRef}
+                className="py-3 text-center text-xs text-slate-400"
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVisibleClientsLimit((prev) => Math.min(filteredClients.length, prev + 80))
+                  }
+                  className="text-xs font-semibold text-[#0052cc] hover:underline cursor-pointer"
+                >
+                  Carregar mais clientes ({filteredClients.length - visibleClients.length} restantes)
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

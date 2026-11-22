@@ -26,6 +26,7 @@ import {
   SHOW_OFFLINE_SYNC_INDICATORS,
 } from '../utils/indexedDbOfflineStore';
 import { useFenixTheme } from '../utils/themeService';
+import { preloadTabModule } from '../utils/modulePreloader';
 
 interface SidebarProps {
   currentTab: string;
@@ -232,6 +233,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       key={item.id}
                       type="button"
+                      onMouseEnter={() => preloadTabModule(item.id)}
+                      onFocus={() => preloadTabModule(item.id)}
+                      onTouchStart={() => preloadTabModule(item.id)}
                       onClick={() => {
                         onSelectTab(item.id);
                         onCloseMobile();

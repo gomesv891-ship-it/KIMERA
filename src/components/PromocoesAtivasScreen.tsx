@@ -78,6 +78,7 @@ import {
   parseNumberFlexible,
   parsePromocoesPayload,
   pluralizePromoUnit,
+  readCachedPromocoes,
   saveCampaignToSupabase,
   updateLotGroupInSupabase,
   updateLotStockInSupabase,
@@ -94,6 +95,7 @@ import {
 
 interface PromocoesAtivasScreenProps {
   currentUserName?: string;
+  isActive?: boolean;
 }
 
 type MainAreaTab = 'produtos' | 'folha' | 'controle';
@@ -118,11 +120,23 @@ function getStatusLabel(status: PromoCampaignStatus): string {
 
 export const PromocoesAtivasScreen: React.FC<PromocoesAtivasScreenProps> = ({
   currentUserName = 'Vanessa Gomes',
+  isActive = true,
 }) => {
   const hasAdminAccess = canManagePromocoes(currentUserName);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
-  const [campaigns, setCampaigns] = useState<PromoCampaign[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const initialCachedRef = useRef<PromoCampaign[] | null>(null);
+  if (initialCachedRef.current === null) {
+    initialCachedRef.current = readCachedPromocoes();
+  }
+  const initialCached = initialCachedRef.current;
+
+  const [campaigns, setCampaigns] = useState<PromoCampaign[]>(() => initialCached);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(() => {
+    const activeOne = initialCached.find((c) => c.status === 'ativa');
+    return activeOne?.id || initialCached[0]?.id || '';
+  });
   const [activeTab, setActiveTab] = useState<MainAreaTab>('produtos');
 
   // Aba 1: Produtos e Ofertas
@@ -137,8 +151,9 @@ export const PromocoesAtivasScreen: React.FC<PromocoesAtivasScreenProps> = ({
   const [isSheetPreviewModalOpen, setIsSheetPreviewModalOpen] = useState(false);
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
-  // Estados gerais de rede
-  const [isLoading, setIsLoading] = useState(true);
+  // Estados gerais de rede (não bloqueia a UI quando já há cache sincronizado)
+  const [isLoading, setIsLoading] = useState(() => initialCached.length === 0);
+  const [isSyncingBackground, setIsSyncingBackground] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -259,38 +274,43 @@ export const PromocoesAtivasScreen: React.FC<PromocoesAtivasScreenProps> = ({
 
   const loadCampaigns = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
+    else setIsSyncingBackground(true);
     setErrorBanner(null);
 
-    const res = await fetchPromocoesFromSupabase();
-    setCampaigns(res.campaigns);
-    if (!res.success && res.error) {
-      setErrorBanner(res.error);
+    try {
+      const res = await fetchPromocoesFromSupabase();
+      setCampaigns(res.campaigns);
+      if (!res.success && res.error) {
+        setErrorBanner(res.error);
+      }
+
+      setSelectedCampaignId((prev) => {
+        if (prev && res.campaigns.some((c) => c.id === prev)) return prev;
+        const activeOne = res.campaigns.find((c) => c.status === 'ativa');
+        return activeOne?.id || res.campaigns[0]?.id || '';
+      });
+    } finally {
+      if (!silent) setIsLoading(false);
+      else setIsSyncingBackground(false);
     }
-
-    setSelectedCampaignId((prev) => {
-      if (prev && res.campaigns.some((c) => c.id === prev)) return prev;
-      const activeOne = res.campaigns.find((c) => c.status === 'ativa');
-      return activeOne?.id || res.campaigns[0]?.id || '';
-    });
-
-    if (!silent) setIsLoading(false);
   }, []);
 
   useEffect(() => {
-    loadCampaigns(false);
+    loadCampaigns(initialCachedRef.current !== null && initialCachedRef.current.length > 0);
 
     const handleRealtime = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
       if (detail?.data !== undefined) {
         const parsed = parsePromocoesPayload(detail.data);
         setCampaigns(parsed);
+        setIsLoading(false);
       } else {
         loadCampaigns(true);
       }
     };
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (isActiveRef.current && document.visibilityState === 'visible') {
         loadCampaigns(true);
       }
     };
@@ -2451,7 +2471,7 @@ export const PromocoesAtivasScreen: React.FC<PromocoesAtivasScreenProps> = ({
               title="Sincronizar com Supabase"
               className="h-10 px-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading || isSyncingBackground ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Atualizar</span>
             </button>
 

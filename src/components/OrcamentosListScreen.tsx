@@ -71,6 +71,7 @@ interface OrcamentosListScreenProps {
   onOpenOrcamento: (orcamento: SavedOrcamento) => void;
   onNavigateTab?: (tab: string) => void;
   currentUserName?: string;
+  isActive?: boolean;
 }
 
 const INITIAL_REFERENCE_ORCAMENTOS: SavedOrcamento[] = [];
@@ -95,7 +96,10 @@ export const OrcamentosListScreen: React.FC<OrcamentosListScreenProps> = ({
   onOpenOrcamento,
   onNavigateTab,
   currentUserName = 'Vanessa Gomes',
+  isActive = true,
 }) => {
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
   const mergeOrcamentoLists = (primary: SavedOrcamento[], secondary: SavedOrcamento[]): SavedOrcamento[] => {
     const byId = new Map<string, SavedOrcamento>();
     const ingest = (list: SavedOrcamento[]) => {
@@ -348,13 +352,15 @@ export const OrcamentosListScreen: React.FC<OrcamentosListScreenProps> = ({
       }
     };
 
-    syncOrcamentosFromSupabase(true);
+    syncOrcamentosFromSupabase(false);
 
     const handleSync = () => {
       loadOrcamentos();
     };
     const handleFocus = () => {
-      syncOrcamentosFromSupabase(false);
+      if (isActiveRef.current) {
+        syncOrcamentosFromSupabase(false);
+      }
     };
 
     window.addEventListener('storage', handleSync);
@@ -372,6 +378,7 @@ export const OrcamentosListScreen: React.FC<OrcamentosListScreenProps> = ({
 
   // Abre automaticamente o orçamento original ao navegar do Follow-up ("Ir para o orçamento" ou "Editar Orçamento")
   useEffect(() => {
+    if (!isActive) return;
     try {
       const targetId = sessionStorage.getItem('fenix_target_orcamento_id');
       const targetAction = sessionStorage.getItem('fenix_target_orcamento_action');
@@ -398,7 +405,7 @@ export const OrcamentosListScreen: React.FC<OrcamentosListScreenProps> = ({
     } catch {
       // ignore
     }
-  }, [orcamentos, onOpenOrcamento]);
+  }, [isActive, orcamentos, onOpenOrcamento]);
 
   // Navigation handlers
   const handlePrevMonth = () => {

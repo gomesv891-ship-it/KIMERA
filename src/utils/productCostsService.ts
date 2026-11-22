@@ -4,6 +4,7 @@ import {
   getLocalCollectionSafe,
   getLocalRawSafe,
   getSupabaseClient,
+  invalidateSupabaseKeyCache,
   setLocalCollectionSafe,
   withAbortableTimeout,
 } from './supabaseClient';
@@ -90,9 +91,7 @@ export async function fetchOfficialProductCostsFromDatabase(currentUserName?: st
         }
       }
 
-      try {
-        localStorage.setItem(KEY_PRODUCT_COSTS_DB, JSON.stringify(merged));
-      } catch {}
+      setLocalCollectionSafe(KEY_PRODUCT_COSTS_DB, merged);
       return merged;
     }
   } catch (err) {
@@ -275,15 +274,13 @@ export async function saveProductCostToSupabase(
           'Tempo limite ao atualizar custo no catálogo de produtos.'
         );
 
-        try {
-          localStorage.setItem('fenix_product_items_data', JSON.stringify(updatedProducts));
-        } catch {}
+        setLocalCollectionSafe('fenix_product_items_data', updatedProducts);
+        invalidateSupabaseKeyCache('fenix_product_items_data');
       }
 
       // 5. Atualizar cache local apenas após confirmação do Supabase
-      try {
-        localStorage.setItem(KEY_PRODUCT_COSTS_DB, JSON.stringify(currentCosts));
-      } catch {}
+      setLocalCollectionSafe(KEY_PRODUCT_COSTS_DB, currentCosts);
+      invalidateSupabaseKeyCache(KEY_PRODUCT_COSTS_DB);
 
       // 6. Notificar componentes
       if (typeof window !== 'undefined') {
